@@ -1,0 +1,658 @@
+---
+title: "ACC data setup"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: Install latest tidycensus
+
+available_versions <- available.packages()[, "Version"]
+installed_version <- packageVersion("tidycensus")
+package_available_versions <-
+  available.packages()[available.packages()[, "Package"] == "tidyverse", "Version"]
+
+# Compare versions
+if (packageVersion("tidyverse") < package_available_versions) {
+  message(paste0("Updating package '", "tidycensus", "'..."))
+  install.packages("tidycensus")
+  message(paste0("Package '", "tidycensus", "' updated to the latest version."))
+} else {
+  message(paste0("Package '", "tidycensus", "' is already up-to-date."))
+}
+
+
+```
+
+```{r}
+#| label: Setup
+
+library(tidyverse)
+library(tidycensus)
+library(httr)
+library(tigris)
+library(sf)
+
+source("code/fcc_api_functions.R")
+
+```
+
+```{r}
+#| label: 2010 - 2020 place crosswalk
+
+place_10_20_xwalk <- read.delim("source/tab20_place20_place10_natl.txt", header = TRUE, sep = "|") |> 
+  mutate(GEOID_PLACE_20 = sprintf("%0*d", 7, GEOID_PLACE_20),
+         GEOID_PLACE_10 = sprintf("%0*d", 7, GEOID_PLACE_10))
+
+place_10_20_xwalk <- place_10_20_xwalk |> 
+  mutate(percent = AREALAND_PART/AREALAND_PLACE_10) |> 
+  select(GEOID_PLACE_20, NAMELSAD_PLACE_20,GEOID_PLACE_10, NAMELSAD_PLACE_10, percent) |> 
+  rename(GEOID = GEOID_PLACE_10)
+
+
+```
+
+```{r}
+#| label: Set up base geography
+
+places <- read.csv("source/place_cdp_county_geocodes.csv") |> 
+  mutate(STATE = sprintf("%0*d", 2, state)) |>
+  mutate(place = sprintf("%0*d", 5, place)) |> 
+  mutate(GEOID = paste0(STATE,place)) |> 
+  mutate(FIPS = sprintf("%0*d", 5, county)) |> 
+  group_by(GEOID) |> 
+  top_n(1,afact) |> 
+  ungroup() |> 
+  rename(NAME = PlaceName) |> 
+  select(GEOID, NAME, STATE,  FIPS) |> 
+  mutate(GEOLEVEL = "Place")
+
+counties <- read.csv("source/all-geocodes-v2020.csv") |> 
+  filter(level == 50) |> 
+  mutate(STATE = sprintf("%0*d", 2, state)) |>
+  mutate(county = sprintf("%0*d", 3, county)) |> 
+  mutate(GEOID = paste0(STATE,county)) |> 
+  mutate(FIPS = GEOID) |> 
+  rename(NAME = area_name) |> 
+  select(GEOID, NAME, STATE,  FIPS) |> 
+  mutate(GEOLEVEL = "County")
+
+states <- read.csv("source/all-geocodes-v2020.csv") |> 
+  filter(level == 40) |> 
+  mutate(STATE = sprintf("%0*d", 2, state)) |>
+  mutate(GEOID = STATE) |> 
+  mutate(FIPS = NA) |> 
+  rename(NAME = area_name) |> 
+  select(GEOID, NAME, STATE,  FIPS) |> 
+  mutate(GEOLEVEL = "State")
+
+us <- data.frame(
+  GEOID = "00",
+  NAME = "United States",
+  STATE = NA,
+  FIPS = NA,
+  GEOLEVEL = "National"
+)
+  
+geo_structure <- rbind(places,counties,states, us)
+```
+
+```{r}
+#| label: Load variable tables
+#| eval: false
+
+vars_2022_profile <- load_variables(2022, "acs5/profile", cache = TRUE) 
+
+vars_2018_profile <- load_variables(2018, "acs5/profile", cache = TRUE) 
+
+summary_table <- vars |> 
+  filter(str_detect(name, "DP05"))
+
+vars_2022_subject <- load_variables(2022, "acs5/subject", cache = TRUE) 
+
+edu_table <- vars_2022_subject |> 
+  filter(str_detect(name, "S1501"))
+
+earnings_table <- vars_2022_subject |> 
+  filter(str_detect(name, "S2001"))
+
+income_table <- vars_2022_subject |> 
+  filter(str_detect(name, "S1903"))
+
+income_dist <- vars_2022_subject |> 
+  filter(str_detect(name, "S1901"))
+
+poverty_table  <- vars_2022_subject |> 
+  filter(str_detect(name, "S1701"))
+
+employment_table <- vars_2022_subject |> 
+  filter(str_detect(name, "S2301"))
+
+broadband_table <- vars_2022_subject |> 
+  filter(str_detect(name, "S2801"))
+```
+
+```{r}
+#| label: Define ACS variables
+
+vars_current <- c(
+  total_pop = "DP05_0001",
+  pop_65_older = "DP05_0024",
+  white_nh = "DP05_0079",
+  black_nh = "DP05_0080",
+  aian_nh = "DP05_0081",
+  asian_nh = "DP05_0082",
+  nhpi_nh = "DP05_0083",
+  other_race_nh = "DP05_0084",
+  hispanic = "DP05_0073",
+  white_combo = "DP05_0066",
+  black_combo = "DP05_0067",
+  aian_combo = "DP05_0068",
+  asian_combo = "DP05_0069",
+  nhpi_combo = "DP05_0070",
+  other_race_combo = "DP05_0071",
+  multiracial = "DP05_0058",
+  pop_25_older = "S1501_C01_006",
+  bach_plus = "S1501_C01_015",
+  median_earnings = "S2001_C01_013",
+  median_income = "S1903_C03_001",
+  poverty = "S1701_C03_001",
+  pop_16_older = "S2301_C01_001",
+  emp_pop_16_older = "S2301_C03_001",
+  pop_25_29 = "S2301_C01_004",
+  pop_30_34 = "S2301_C01_005",
+  pop_35_44 = "S2301_C01_006",
+  pop_45_54 = "S2301_C01_007",
+  emp_pop_25_29 = "S2301_C03_004",
+  emp_pop_30_34 = "S2301_C03_005",
+  emp_pop_35_44 = "S2301_C03_006",
+  emp_pop_45_54 = "S2301_C03_007",
+  total_households = "S2801_C01_001",
+  hh_w_computer = "S2801_C01_003",
+  hh_w_bb = "S2801_C01_017",
+  hh_less_20k_inc = "S2801_C01_020",
+  hh_less_20k_inc_bb = "S2801_C01_022",
+  inc_less_10k = "S1901_C01_002",
+  inc_10k_15k = "S1901_C01_003",
+  inc_15k_25k = "S1901_C01_004",
+  inc_25k_35k = "S1901_C01_005",
+  inc_35k_50k = "S1901_C01_006",
+  inc_50k_75k = "S1901_C01_007"
+)
+
+# vars_past <- c(
+#   total_pop = "DP05_0001",
+#   pop_16_older = "S2301_C01_001",
+#   emp_pop_16_older = "S2301_C03_001"
+# )
+
+current_acs <- formals(get_acs)
+current_acs <- current_acs$year
+
+```
+
+```{r}
+#| label: Load place ACS data
+
+place_data_current <- get_acs(
+  geography = "place",
+  variables = vars_current,
+  year = current_acs,
+  survey = "acs5"
+)
+
+# place_data_past <- get_acs(
+#   geography = "place",
+#   variables = vars_past,
+#   year = current_acs-5,
+#   survey = "acs5"
+# )
+
+# place_data_past_xwalk <- place_data_past |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
+#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
+#   mutate(employed = round(pop_16_older*emp_pop_16_older/100,0)) |> 
+#   left_join(place_10_20_xwalk) |> 
+#   group_by(GEOID_PLACE_20, NAMELSAD_PLACE_20) |> 
+#   summarize(
+#     total_pop_5yr_past = round(sum(total_pop*percent),0),
+#     employed_5yr_past = round(sum(employed*percent),0)
+#   ) |> 
+#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
+#   mutate(moe = NA) |> 
+#   rename(GEOID = GEOID_PLACE_20,
+#          NAME = NAMELSAD_PLACE_20) |> 
+#   mutate(GEOID = trimws(GEOID)) |> 
+#   filter(GEOID != "NA") |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
+
+# Removing past data
+# place_data <- rbind(place_data_current, place_data_past_xwalk)
+place_data <- rbind(place_data_current)
+
+```
+
+```{r}
+#| label: Load county ACS data
+
+county_data_current <- get_acs(
+  geography = "county",
+  variables = vars_current,
+  year = current_acs,
+  survey = "acs5"
+)
+
+
+# county_data_past <- get_acs(
+#   geography = "county",
+#   variables = vars_past,
+#   year = current_acs-5,
+#   survey = "acs5"
+# )
+# 
+# county_data_past <- county_data_past |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
+#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
+#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
+#   rename(total_pop_5yr_past = total_pop) |> 
+#   select(-pop_16_older, -emp_pop_16_older) |> 
+#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
+#   mutate(moe = NA) |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
+
+# Removing past data
+# county_data <- rbind(county_data_current, county_data_past)
+county_data <- rbind(county_data_current)
+
+
+```
+
+```{r}
+#| label: Load state ACS data
+
+state_data_current <- get_acs(
+  geography = "state",
+  variables = vars_current,
+  year = current_acs,
+  survey = "acs5"
+)
+
+
+# state_data_past <- get_acs(
+#   geography = "state",
+#   variables = vars_past,
+#   year = current_acs-5,
+#   survey = "acs5"
+# )
+# 
+# state_data_past <- state_data_past |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
+#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
+#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
+#   rename(total_pop_5yr_past = total_pop) |> 
+#   select(-pop_16_older, -emp_pop_16_older) |> 
+#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
+#   mutate(moe = NA) |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
+
+# Removing past data
+# state_data <- rbind(state_data_current, state_data_past)
+state_data <- rbind(state_data_current)
+
+```
+
+```{r}
+#| label: Load US ACS data
+
+us_data_current <- get_acs(
+  geography = "us",
+  variables = vars_current,
+  year = current_acs,
+  survey = "acs5"
+)
+
+us_data_current <- us_data_current |> 
+  mutate(GEOID = "00")
+
+# us_data_past <- get_acs(
+#   geography = "us",
+#   variables = vars_past,
+#   year = current_acs-5,
+#   survey = "acs5"
+# )
+# 
+# us_data_past <- us_data_past |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
+#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
+#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
+#   rename(total_pop_5yr_past = total_pop) |> 
+#   select(-pop_16_older, -emp_pop_16_older) |> 
+#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
+#   mutate(moe = NA) |> 
+#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
+
+# Removing past data
+# us_data <- rbind(us_data_current, us_data_past)
+us_data <- rbind(us_data_current)
+
+```
+
+```{r}
+#| label: Combine ACS data
+ 
+acs_data <- rbind(place_data, county_data, state_data, us_data) |> 
+  select(-moe) |> 
+  pivot_wider(names_from = "variable", values_from = "estimate") |> 
+  select(-NAME) |> 
+  mutate(acs5 = paste(current_acs-4,"-", current_acs))
+
+#save(acs_data, file="data_setup/acs_data.rda")
+
+```
+
+```{r}
+#| label: Load broadband access data
+
+
+date<- get_fcc_as_of_dates_list() |> 
+  filter(data_type == "availability") |> 
+  mutate(as_of_date = as.Date(as_of_date)) |> 
+  filter(as_of_date == max(as_of_date)) |> 
+  select(as_of_date) |> 
+  pull()
+
+file_info_place <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Census Place") |> 
+  select(file_id, file_name)
+
+file_list_place <- purrr::map2(file_info_place$file_id, file_info_place$file_name, get_fcc_availability_file)
+
+place_df <- dplyr::bind_rows(file_list_place)
+
+file_info_other <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Other Geographies") 
+
+file_list_other <- purrr::map2(file_info_other$file_id, file_info_other$file_name, get_fcc_availability_file)
+
+other_df <- dplyr::bind_rows(file_list_other)
+
+bb_data <- rbind(place_df, other_df) 
+
+bb_final <- bb_data |> 
+  filter(biz_res %in% "R",
+         technology == "All Wired",
+         area_data_type == "Total") |> 
+  mutate(fcc_date = paste(date)) |>
+  select(geography_id, fcc_date, total_units, speed_25_3, speed_100_20, speed_1000_100) |> 
+  rename(GEOID = geography_id,
+         pct_served_25_3 = speed_25_3,
+         pct_served_100_20 = speed_100_20,
+         pct_served_1000_100 = speed_1000_100) |> 
+  mutate(GEOID = ifelse(GEOID == "99", "00", GEOID))
+  
+# 
+# bb_type <- bb_data |> 
+#   filter(area_data_type == "Total") |> 
+#   select(area_data_type:total_units, t1_s1_r:t3_s7_r) |> 
+#   pivot_longer(cols = -(area_data_type:total_units), names_to = "service_type", values_to = "pct_served") |> 
+#   separate(service_type, into = c("service", "speed", "loc_type"))  |> 
+#   filter(loc_type != "b") |> 
+#   mutate(service = case_when(
+#     service == "t1" ~ "copper",
+#     service == "t2" ~ "cable",
+#     service == "t3" ~ "fiber",
+#     TRUE ~ "other"),
+#     speed = case_when(
+#       speed == "s1" ~ "0.2_0.2",
+#       speed == "s2" ~ "10_1",
+#       speed == "s3" ~ "25_3",
+#       speed == "s4" ~ "100_20",
+#       speed == "s5" ~ "250_25",
+#       speed == "s6" ~ "1000_10",
+#       speed == "s7" ~ "50_5",
+#       TRUE ~ "other"
+#     )) 
+# 
+# bb_type_data <- bb_type |> 
+#   group_by(geography_type, geography_id,geography_desc, service) |> 
+#   summarize(
+#     total_units = mean(total_units),
+#     pct_served = max(pct_served)
+#   ) |> ungroup() |> 
+#   rename(GEOID = geography_id) |>
+#   select(GEOID, service, total_units, pct_served) |> 
+#   pivot_wider(names_from = service, names_prefix = "pct_served_", values_from = pct_served) 
+# 
+# total_units_sum <- bb_type |> 
+#   filter(geography_type == "State") |> 
+#   select(geography_id, total_units) |> 
+#   distinct() |> 
+#   pull(total_units) |> 
+#   sum()
+# 
+# bb_type_us <- bb_type |> 
+#   filter(geography_type == "State",
+#          geography_id != 72) |>
+#   group_by(geography_type, geography_id, service) |> 
+#   summarize(
+#     total_units = mean(total_units),
+#     pct_served = max(pct_served)
+#   ) |> ungroup() |> 
+#   group_by(geography_type, service) |> 
+#   summarize(
+#     served = sum(pct_served*total_units),
+#     total_units = sum(total_units),
+#     pct_served = served/total_units
+#   ) |> ungroup() |> 
+#   mutate(GEOID = "00") |> 
+#   select(GEOID, service, total_units, pct_served) |> 
+#   pivot_wider(names_from = service, names_prefix = "pct_served_", values_from = pct_served) 
+# 
+# bb_type_data <- rbind(bb_type_data, bb_type_us)
+#   
+# bb_speed <- bb_data |> 
+#   filter(area_data_type == "Total") |> 
+#   select(area_data_type:total_units, t1_2_3_s1_r:t1_2_3_s7_r) |> 
+#   pivot_longer(cols = -(area_data_type:total_units), names_to = "service_type", values_to = "pct_served") |> 
+#   mutate(speed = case_when(
+#       str_detect(service_type, "s1") ~ "0.2_0.2",
+#       str_detect(service_type,"s2") ~ "10_1",
+#       str_detect(service_type,"s3") ~ "25_3",
+#       str_detect(service_type,"s4") ~ "100_20",
+#       str_detect(service_type,"s5") ~ "250_25",
+#       str_detect(service_type,"s6") ~ "1000_10",
+#       str_detect(service_type,"s7") ~ "50_5",
+#       TRUE ~ "other"
+#     )) |> 
+#   filter(speed %in% c("25_3", "100_20", "1000_10")) 
+# 
+# 
+# bb_speed_data <- bb_speed |>
+#   rename(GEOID = geography_id) |> 
+#   select(GEOID, speed, pct_served) |> 
+#   pivot_wider(names_from = speed, names_prefix = "pct_served_", values_from = pct_served)
+# 
+# bb_speed_us <- bb_speed |> 
+#   filter(geography_type == "State",
+#          geography_id != 72) |>
+#   group_by(geography_type, speed) |> 
+#    summarize(
+#     served = sum(pct_served*total_units),
+#     total_units = sum(total_units),
+#     pct_served = served/total_units
+#   ) |> ungroup() |> 
+#   mutate(GEOID = "00") |> 
+#   select(GEOID, speed, pct_served) |> 
+#   pivot_wider(names_from = speed, names_prefix = "pct_served_", values_from = pct_served)
+# 
+# bb_speed_data <- rbind(bb_speed_data, bb_speed_us)
+# 
+# 
+# 
+# bb_final <- bb_type_data |> 
+#   left_join(bb_speed_data)
+
+
+
+#save(bb_final, file="data_setup/bb_final.rda")
+```
+
+```{r}
+#| label: Load place social vulnerability data
+
+svi_data <- read.csv("source/SVI_2022_US.csv") 
+svi_version <- 2022
+
+colnames(svi_data)[1] <- "ST"
+
+tract_to_place <- read.csv("source/tract_place_2020_xwalk.csv") 
+
+tract_to_place <- tract_to_place |> 
+  mutate(tract = str_replace(tract,"\\.","")) |> 
+  mutate(FIPS = as.numeric(paste0(county,tract)),
+         GEOID = paste0(state,place)) |> 
+  filter(county!="County code") |> 
+  mutate(afact = as.numeric(trimws(afact)),
+         pop20 = as.numeric(pop20)) |> 
+  select(FIPS, GEOID, PlaceName, afact, pop20) 
+
+svi_df <- svi_data |> 
+  left_join(tract_to_place) |> 
+  filter(RPL_THEMES != -999) 
+
+place_total_pop <- svi_df |>
+  group_by(GEOID) |> 
+  summarize(total_pop = sum(pop20))
+
+svi_place_data <- svi_df |> 
+  left_join(place_total_pop) |> 
+  group_by(GEOID, PlaceName) |>
+  mutate(pop_share = pop20/total_pop) |> 
+  summarize(
+    svi = sum(RPL_THEMES*pop_share)
+  ) |> 
+  ungroup() |> 
+  filter(!is.na(svi),
+         PlaceName != "[not in a place]") |> 
+  mutate(ptile = percent_rank(svi),
+         svi_level = case_when(
+           ptile >= .75 ~ "high",
+           ptile >= .5 & ptile < .75 ~ "med_high",
+           ptile >= .25 & ptile < .5 ~ "med_low",
+           ptile < .25 ~ "low"
+         )) |> 
+  select(GEOID, svi_level)
+
+
+svi_counties <- read.csv("source/SVI_2022_US_county.csv")
+
+svi_county_data <- svi_counties |> 
+  select(FIPS, LOCATION, RPL_THEMES) |> 
+  mutate(ptile = percent_rank(RPL_THEMES)) |> 
+  rename(PlaceNmae = LOCATION,
+         svi = RPL_THEMES) |> 
+  mutate(ptile = percent_rank(svi),
+         svi_level = case_when(
+           ptile >= .75 ~ "high",
+           ptile >= .5 & ptile < .75 ~ "med_high",
+           ptile >= .25 & ptile < .5 ~ "med_low",
+           ptile < .25 ~ "low"
+         )) |> 
+  mutate(GEOID = sprintf("%0*d", 5, FIPS)) |> 
+  select(GEOID, svi_level)
+
+svi_place_county <- rbind(svi_place_data,svi_county_data) |> 
+  mutate(svi_version = svi_version) 
+
+svi_state <- svi_data |> 
+  group_by(ST, STATE) |> 
+  mutate(ptile = percent_rank(RPL_THEMES)) |>
+  summarize(
+    svi_high = sum(E_TOTPOP[ptile >=.75]),
+    svi_med_high = sum(E_TOTPOP[ptile >= .50 & ptile <.75]),
+    svi_med_low = sum(E_TOTPOP[ptile >= .25 & ptile < .5]),
+    svi_low = sum(E_TOTPOP[ptile < .25]),
+    svi_total = sum(E_TOTPOP)
+  )|>  
+  ungroup() |> 
+  mutate(GEOID = sprintf("%0*d", 2, ST)) |> 
+  select(GEOID, svi_high:svi_total)
+
+svi_us <- svi_data |> 
+  mutate(group = "US") |> 
+  group_by(group) |> 
+  mutate(ptile = percent_rank(RPL_THEMES)) |>
+  summarize(
+    svi_high = sum(E_TOTPOP[ptile >=.75]),
+    svi_med_high = sum(E_TOTPOP[ptile >= .50 & ptile <.75]),
+    svi_med_low = sum(E_TOTPOP[ptile >= .25 & ptile < .5]),
+    svi_low = sum(E_TOTPOP[ptile < .25]),
+    svi_total = sum(E_TOTPOP)
+  )|>  
+  ungroup() |> 
+  mutate(GEOID = "00") |> 
+  select(GEOID, svi_high:svi_total)
+  
+svi_state_us <- rbind(svi_state, svi_us) |> 
+  mutate(svi_version = svi_version) 
+
+```
+
+```{r}
+#| label: Setup 
+
+area_type <- read.csv("source/metro_rural_type.csv")
+
+area_type <- area_type |> 
+  mutate(FIPS = paste0(sprintf("%0*d", 2, state), sprintf("%0*d", 3,county))) |> 
+  mutate(area_type = case_when(
+    str_detect(cbsa, "Micropolitan") ~ "Rural",
+    str_detect(cbsa, "Metropolitan") & type == "Central" ~ "Metro Core",
+    str_detect(cbsa, "Metropolitan") & type == "Outlying" ~ "Suburban"
+  )) |> 
+  select(FIPS, area_type)
+```
+
+```{r}
+#| label: Combine data with geostructure
+
+final_df <- geo_structure |> 
+  left_join(acs_data, by = "GEOID") |> 
+  left_join(bb_final, by = "GEOID") |> 
+  left_join(svi_place_county, by = "GEOID") |> 
+  left_join(svi_state_us, by = c("GEOID", "svi_version")) |> 
+  left_join(area_type, by = "FIPS") |> 
+  mutate(area_type = ifelse(is.na(area_type),case_when(
+    GEOLEVEL %in% c("Place", "County") ~ "Rural",
+    TRUE ~ "State"), area_type)
+  )
+
+state_names <- final_df |> 
+  filter(GEOLEVEL == "State") |> 
+  select(NAME, STATE) |> 
+  rename(STATE_NAME = NAME)
+
+final_df <- final_df |> 
+  left_join(state_names)
+
+
+save(final_df, file = "data/final_df.rda")
+```
+
+```{r}
+#| label: Set up map coordinates
+
+place_sf <- places(cb=TRUE) |> 
+  select(GEOID, geometry)
+state_sf <- states(cb=TRUE)|> 
+  select(GEOID, geometry)
+county_sf <- counties(cb=TRUE)|> 
+  select(GEOID, geometry)
+
+coords <- rbind(place_sf, state_sf, county_sf) |> 
+  mutate(centroid = st_centroid(geometry),
+         latitude = st_coordinates(centroid)[,2],
+         longitude = st_coordinates(centroid)[,1]) |> 
+  select(GEOID, latitude, longitude) |> 
+  st_drop_geometry()
+
+save(coords, file = "data/coords.rda")
+```

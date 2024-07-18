@@ -1,0 +1,1673 @@
+---
+title: "ACC Dashboard"
+format: 
+  dashboard:
+    scrolling: true
+    theme: flatly
+server: shiny
+---
+
+```{r}
+#| context: setup
+
+library(tidyverse)
+library(googlesheets4)
+library(googledrive)
+library(shiny)
+library(pins)
+library(plotly)
+library(shinydashboard)
+library(bslib)
+library(bsicons)
+library(DescTools)
+library(leaflet)
+library(DT)
+library(rairtable)
+library(openxlsx)
+
+
+readRenviron(".Renviron")
+load("data/final_df.rda")
+
+acs5 <- final_df |> select(acs5) |> distinct() |> filter(!is.na(acs5)) |> pull()
+fcc_date <- final_df |> select(fcc_date) |> distinct() |> filter(!is.na(fcc_date)) |> pull()
+svi_version <- final_df |> select(svi_version) |> distinct() |> filter(!is.na(svi_version)) |> pull()
+
+# 
+# # Airtable references
+# # https://airtable.com/applaL6cJQ4WVe7Lt/api/docs?_gl=1*1fm1d8t*_ga*MTczNzcwOTQ3NS4xNzEyNjY5OTQ1*_ga_VJY8J9RFZM*MTcxODIzODM4NS42LjEuMTcxODIzOTM5OS40Mi4wLjA.#curl/
+# 
+# set_airtable_api_key(Sys.getenv("AIRTABLE_PAT"), install = FALSE)
+# 
+# # Read host table form ACC airtable
+# host_airtable <- airtable("tblaloyqNggJgvHe6",'applaL6cJQ4WVe7Lt')
+# 
+# host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJwFkvKeeE5RS", "fldkIelttv5tMgOrF"), id_to_col = TRUE) 
+# 
+# names(host_df) <- c("host_id","host", "cohort_years", "ID")
+# 
+# # Read geographic table from ACC airtable
+# geo_airtable <- 
+#   airtable("tbllHwSwdK42uX8np", 'applaL6cJQ4WVe7Lt') 
+# 
+# geo_df <- read_airtable(geo_airtable, fields = c("fldhfRYHYx1TiQeVA", "fldnhQONsUqURU3Ov", "fldIA59fcT1tAl1PX"), id_to_col = TRUE)
+# 
+# names(geo_df) <- c("record_id","host_id", "geoid", "geogroup")
+# 
+# geo_df <- geo_df |> 
+#   mutate(host_id = as.character(host_id)) |> 
+#   left_join(host_df, by = "host_id") |>
+#   select(-host_id) |> 
+#   mutate(cohort_years = sapply(cohort_years, function(x) paste(sort(unique(x)), collapse = ", ")))
+# 
+# geo_df <- geo_df |> 
+#   left_join(final_df, by = c("geoid" = "GEOID"))
+# 
+# 
+# places <- geo_df |> 
+#   filter(GEOLEVEL == "Place")
+# 
+# counties <- geo_df |> 
+#   filter(GEOLEVEL == "County")
+# 
+# states <- geo_df |> 
+#   filter(GEOLEVEL == "State")
+# 
+# place_codes <- places$geoid |> 
+#   unique()
+# 
+# county_codes <- counties$geoid |> 
+#   unique()
+# 
+# state_codes <- states$geoid |> 
+#   unique()
+# 
+# places_states <- places |> 
+#   mutate(state_code = substr(geoid,1,2)) |> 
+#   pull(state_code) |> 
+#   unique()
+# 
+# county_states <- counties |> 
+#   mutate(state_code = substr(geoid,1,2)) |> 
+#   pull(state_code)  |> 
+#   unique()
+# 
+# site_type <- geo_df |> 
+#   select(ID, geoid, geogroup) |> 
+#   filter(!is.na(geogroup)) |> 
+#   select(-geoid)
+# 
+# 
+# acc_site_data <- geo_df |> 
+#   left_join(site_type) 
+# 
+# 
+# load("data/coords.rda")
+# 
+# 
+# assign_region_area_type <- function(df){
+#   df |> 
+#     group_by(ID, host, area_type) %>%
+#     summarize(
+#       total_pop = sum(total_pop, na.rm = TRUE)) |> 
+#     filter(total_pop == max(total_pop)) |> 
+#     select(ID, host, area_type)
+# }
+# 
+# region_area_type <- acc_site_data |> 
+#   assign_region_area_type()
+# 
+# acc_map_county <- acc_site_data %>%
+#   filter(GEOLEVEL == "County") %>%
+#   left_join(coords, by = c("geoid" = "GEOID")) |>
+#   group_by(ID, geogroup, cohort_years, STATE_NAME) %>%
+#   summarize(
+#     latitude = mean(latitude),
+#     longitude = mean(longitude),
+#     host = first(host),
+#     NAME = paste(NAME, collapse = ", ")
+#   ) |> left_join(region_area_type)
+# 
+# acc_map_place <- acc_site_data |> 
+#   filter(GEOLEVEL == "Place") |> 
+#   left_join(coords, by = c("geoid" = "GEOID")) |> 
+#   select(names(acc_map_county))
+# 
+# acc_map_state <- acc_site_data |> 
+#   filter(GEOLEVEL == "State") |> 
+#   left_join(coords, by = c("geoid" = "GEOID")) |> 
+#   select(names(acc_map_county))
+# 
+# acc_map_data <- rbind(acc_map_place, acc_map_state, acc_map_county) |> 
+#   mutate(latitude = jitter(latitude, factor = 2),
+#          longitude = jitter(longitude, factor = 2)) |> 
+#   group_by(host) |> 
+#   ungroup() |> 
+#   select(ID, latitude, longitude, cohort_years, area_type)
+# 
+# acc_site_data <- acc_site_data |> 
+#   select(-area_type) |> 
+#   left_join(acc_map_data) |> 
+#   distinct() |> 
+#   filter(!is.na(geoid))
+# 
+# 
+# remove_duplicates <- function(df) {
+#   
+#   
+#   if("State" %in% df$geogroup){
+#     df <- df |> group_by(STATE) |> 
+#       mutate(includes_state = ifelse(geogroup == "State",1,0)) |>
+#       mutate(includes_state = ifelse(sum(includes_state) >= 1, 1,0)) |> 
+#       ungroup()
+#     
+#     df_state <- df |> 
+#       filter((includes_state == 1 & geogroup == "State"))  
+#     
+#     
+#     df_single <- df |>
+#       filter(includes_state !=1) |>
+#       group_by(FIPS) |> 
+#       filter(n() == 1 | (n() > 1 & !(("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)))) |> 
+#       ungroup()
+#     
+#     df_dup <- df  |> 
+#       filter(includes_state !=1) |>
+#       group_by(FIPS) %>%
+#       filter(n() > 1 & ("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)) |>
+#       filter(GEOLEVEL == "County") |> 
+#       ungroup()
+#     
+#     df <- rbind(df_state, df_single, df_dup) |> select(-includes_state)
+#     
+#   } else {
+#     df_single <- df |> 
+#       group_by(FIPS) |> 
+#       filter(n() == 1 | (n() > 1 & !(("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)))) |> ungroup()
+#     
+#     df_dup <- df  |> 
+#       group_by(FIPS) %>%
+#       filter(n() > 1 & ("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)) |>
+#       filter(GEOLEVEL == "County") |> 
+#       ungroup()
+#     
+#     df <- rbind(df_single, df_dup)
+#   }
+#   
+#   return(df)
+# }
+# 
+# 
+# create_race_vars <- function(df){
+#   
+#   df <- df |> 
+#     summarize(
+#       White = sum(white_combo)/sum(total_pop),
+#       "Black & African American" = sum(black_combo)/sum(total_pop),
+#       "American Indian & Alaska Native" = sum(aian_combo)/sum(total_pop),
+#       "Native Hawaiian & Pacific Islander" = sum(nhpi_combo)/sum(total_pop),
+#       Hispanic = sum(hispanic)/sum(total_pop),
+#       Asian = sum(asian_combo)/sum(total_pop),
+#     ) 
+#   
+# }
+# 
+# 
+# area_type_options <- acc_site_data |> 
+#   select(area_type) |> 
+#   distinct() |> 
+#   pull()
+# 
+# all_years <- unlist(strsplit(unique(acc_site_data$cohort_years), ", "))
+# 
+# cohort_years <- as.numeric(unique(all_years))
+
+remove_duplicates <<- function(df) {
+  
+  
+  if("State" %in% df$geogroup){
+    df <- df |> group_by(STATE) |> 
+      mutate(includes_state = ifelse(geogroup == "State",1,0)) |>
+      mutate(includes_state = ifelse(sum(includes_state) >= 1, 1,0)) |> 
+      ungroup()
+    
+    df_state <- df |> 
+      filter((includes_state == 1 & geogroup == "State"))  
+    
+    
+    df_single <- df |>
+      filter(includes_state !=1) |>
+      group_by(FIPS) |> 
+      filter(n() == 1 | (n() > 1 & !(("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)))) |> 
+      ungroup()
+    
+    df_dup <- df  |> 
+      filter(includes_state !=1) |>
+      group_by(FIPS) %>%
+      filter(n() > 1 & ("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)) |>
+      filter(GEOLEVEL == "County") |> 
+      ungroup()
+    
+    df <- rbind(df_state, df_single, df_dup) |> select(-includes_state)
+    
+  } else {
+    df_single <- df |> 
+      group_by(FIPS) |> 
+      filter(n() == 1 | (n() > 1 & !(("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)))) |> ungroup()
+    
+    df_dup <- df  |> 
+      group_by(FIPS) %>%
+      filter(n() > 1 & ("Place" %in% GEOLEVEL) & ("County" %in% GEOLEVEL)) |>
+      filter(GEOLEVEL == "County") |> 
+      ungroup()
+    
+    df <- rbind(df_single, df_dup)
+  }
+  
+  return(df)
+}
+
+
+create_race_vars <- function(df){
+  
+  df <- df |> 
+    summarize(
+      White = sum(white_combo)/sum(total_pop),
+      "Black & African American" = sum(black_combo)/sum(total_pop),
+      "American Indian & Alaska Native" = sum(aian_combo)/sum(total_pop),
+      "Native Hawaiian & Pacific Islander" = sum(nhpi_combo)/sum(total_pop),
+      Hispanic = sum(hispanic)/sum(total_pop),
+      Asian = sum(asian_combo)/sum(total_pop),
+    ) 
+  
+}
+```
+
+# Toolbar {.toolbar}
+
+```{r}
+
+selectInput("cohort", "Cohort", choices = NULL, selected = NULL, multiple = TRUE)
+
+selectInput("siteType", "Host Site Type", choices = NULL, multiple = TRUE)
+
+selectInput("areaType", "Area Type", choices = NULL, multiple = TRUE)
+
+selectInput("state", "State", choices = NULL, multiple = TRUE)
+
+```
+
+# Map
+
+## Map data boxes
+
+```{r}
+bslib::value_box(
+  title = "Host sites",
+  value = textOutput("host_site_count"),  
+  theme = "primary",
+  fill=FALSE
+)
+```
+
+```{r}
+bslib::value_box(
+  title = "States",
+  value = textOutput("state_count"),  
+  theme = "primary",
+  fill=FALSE
+)
+```
+
+```{r}
+bslib::value_box(
+  title = "Recurring host sites",
+  value = textOutput("recurring_count"),  
+  theme = "primary",
+  fill=FALSE
+)
+```
+
+## Map
+
+```{r}
+#| title: Map
+
+leafletOutput("map", width = "100%", height = "600px")
+
+```
+
+# Area Characteristics
+
+## Population {height="450px"}
+
+### Total population {width="34%"}
+
+#### Total population box {height="34%"}
+
+```{r}
+#| label: population box
+bslib::value_box(
+  title = "Total Population",
+  value = textOutput("total_pop_txt"),  
+  theme = "primary",
+  fill=FALSE
+)
+```
+
+#### Population histogram {height="67%"}
+
+```{r}
+#| label: Population Histogram
+#| title: Population Histogram
+
+plotlyOutput("pop_histogram")
+
+```
+
+### Population by area type {.tabset width="66%"}
+
+```{r}
+#| title: Population
+plotlyOutput('pop_area_type')
+
+```
+
+```{r}
+#| title: Population Share
+plotlyOutput('share_area_type')
+
+```
+
+## Row
+
+```{r}
+#|title: Race
+plotlyOutput('race_plot')
+```
+
+## Row
+
+### Column
+
+```{r}
+#| title: Aged 65+
+
+plotlyOutput('age_65')
+```
+
+```{r}
+#| title: Bachelor's degree
+
+plotlyOutput('bach')
+```
+
+## Row {.tabset}
+
+```{r}
+#| title: Share living in SVI area
+
+plotlyOutput('svi_share')
+```
+
+```{r}
+#| title: Total living in SVI area
+
+plotlyOutput('svi_total')
+```
+
+```{r}
+#| title: Info
+htmlOutput("svi_description")
+```
+
+## Row
+
+### Col
+
+```{r}
+#| title: Median Income
+
+plotlyOutput('median_income')
+```
+
+```{r}
+#| title: Poverty Rate
+plotlyOutput('poverty')
+
+```
+
+# Digital Connectivity
+
+## Row {height="450px"}
+
+### Col {width="33%"}
+
+```{r}
+bslib::value_box(
+  title = "Without a broadband subscription",
+  value = textOutput("wo_broadband"),  
+  theme = "blue",
+  fill=FALSE
+)
+```
+
+```{r}
+bslib::value_box(
+  title = "Without a computer at home",
+  value = textOutput("wo_computer"),  
+  theme = "blue",
+  fill=FALSE
+)
+```
+
+### 
+
+```{r}
+plotlyOutput('bb_share')
+```
+
+## Row
+
+### Col
+
+```{r}
+
+plotlyOutput('gauge_25_3')
+```
+
+#### Row
+
+```{r}
+bslib::value_box(
+  title = "Population without 25/3 option",
+  value = textOutput("unserved_25_3"),  
+  theme = "blue",
+  fill=FALSE
+)
+```
+
+### Col
+
+```{r}
+#| label: Percent of households served by 100/20 internet
+#| fit-cap: "Source: FCC Broadband Map; Gray bar represents US rate."
+plotlyOutput('gauge_100_20')
+```
+
+#### Row
+
+```{r}
+bslib::value_box(
+  title = "Population without 100/20 option",
+  value = textOutput("unserved_100_20"),  
+  theme = "blue",
+  fill=FALSE
+)
+```
+
+### Col
+
+```{r}
+
+plotlyOutput('gauge_1000_100')
+
+```
+
+#### Row
+
+```{r}
+bslib::value_box(
+  title = "Population without 1000/10 option",
+  value = textOutput("unserved_1000_100"),  
+  theme = "blue",
+  fill=FALSE
+)
+```
+
+## Row {.tabset}
+
+```{r}
+#| title: Affordability - Total
+
+plotlyOutput('not_afford_total')
+
+```
+
+```{r}
+#| title: Affordability - Share
+
+plotlyOutput('not_afford_share')
+
+```
+
+```{r}
+#| title: Info
+
+htmlOutput("broadband_afford_description")
+```
+
+# Data
+
+## Data tabs {.tabset}
+
+```{r}
+#| title: Areas used to calculate data
+#| label: Areas used to calculate data
+dataTableOutput("area_table")
+
+```
+
+```{r}
+#| title: Host sites included in filter
+#| label: Host sites included in filter
+dataTableOutput("host_table")
+
+```
+
+```{r}
+#| title: Data tables info
+#| label: Data tables info
+
+htmlOutput("data_tables_description")
+
+```
+
+## Toolbar {.toolbar}
+
+```{r}
+uiOutput("download_ui")
+```
+
+# Data Sources
+
+Data sources for this dashboard include the following:
+
+-   [**US Census American Community Survey**](https://data.census.gov/){target="blank"} **5-year estimates: `r acs5`**
+
+    -   Population
+
+    -   Race & ethnicity
+
+    -   Bachelor's degree
+
+    -   65 and older population
+
+    -   Median Income
+
+    -   Poverty Rate
+
+    -   Population with a computer at home
+
+    -   Population with a broadband subscription
+
+    -   Population that cannot afford broadband at varying price levels
+
+-   [**US Census Core Based Statistical Areas**](https://www.census.gov/geographies/reference-files/time-series/demo/metro-micro/delineation-files.html){target="blank"} **- 2023**
+
+    -   Rural, Suburban, Urban core definitions. **Rural** is defined as areas within non-metropolitan counties. **Suburban** is defined as areas within metro counties that are not the core metro county. **Urban core** is defined as areas within the metro core county.
+
+-   [**FCC National Broadband Map**](https://broadbandmap.fcc.gov/home){target="blank"} **as of `r fcc_date`**
+
+    -   Availability of broadband subscription options by speed level.
+
+-   [**Centers for Disease Control Social Vulnerability Index**](https://www.atsdr.cdc.gov/placeandhealth/svi/index.html){target="blank"}**: Version `r svi_version`**
+
+    -   Share of population living in SVI area
+
+    -   Total population living in SVI areas
+
+```{r}
+#| context: server
+#| label: Server
+
+############ SET UP DATA ############
+
+pal <- c("#2c3e50","#eec643", "#4CAF50")
+
+# Airtable references
+# https://airtable.com/applaL6cJQ4WVe7Lt/api/docs?_gl=1*1fm1d8t*_ga*MTczNzcwOTQ3NS4xNzEyNjY5OTQ1*_ga_VJY8J9RFZM*MTcxODIzODM4NS42LjEuMTcxODIzOTM5OS40Mi4wLjA.#curl/
+
+set_airtable_api_key(Sys.getenv("AIRTABLE_PAT"), install = FALSE)
+
+# Read host table form ACC airtable
+host_airtable <- airtable("tblaloyqNggJgvHe6",'applaL6cJQ4WVe7Lt')
+
+host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJwFkvKeeE5RS", "fldkIelttv5tMgOrF", "fldFIFovrfPTMtsZ3"), id_to_col = TRUE) 
+
+names(host_df) <- c("host_id","host", "geogroup", "cohort_years", "ID")
+
+# Read geographic table from ACC airtable
+geo_airtable <- 
+  airtable("tbllHwSwdK42uX8np", 'applaL6cJQ4WVe7Lt') 
+
+geo_df <- read_airtable(geo_airtable, fields = c("fldhfRYHYx1TiQeVA", "fldnhQONsUqURU3Ov"), id_to_col = TRUE)
+
+names(geo_df) <- c("record_id","host_id", "geoid")
+
+geo_df <- geo_df |> 
+  mutate(host_id = as.character(host_id)) |> 
+  left_join(host_df, by = "host_id") |>
+  select(-host_id) |> 
+  mutate(cohort_years = sapply(cohort_years, function(x) paste(sort(unique(x)), collapse = ", ")))
+
+geo_df <- geo_df |> 
+  left_join(final_df, by = c("geoid" = "GEOID"))
+
+
+places <- geo_df |> 
+  filter(GEOLEVEL == "Place")
+
+counties <- geo_df |> 
+  filter(GEOLEVEL == "County")
+
+states <- geo_df |> 
+  filter(GEOLEVEL == "State")
+
+place_codes <- places$geoid |> 
+  unique()
+
+county_codes <- counties$geoid |> 
+  unique()
+
+state_codes <- states$geoid |> 
+  unique()
+
+places_states <- places |> 
+  mutate(state_code = substr(geoid,1,2)) |> 
+  pull(state_code) |> 
+  unique()
+
+county_states <- counties |> 
+  mutate(state_code = substr(geoid,1,2)) |> 
+  pull(state_code)  |> 
+  unique()
+
+site_type <- geo_df |> 
+  select(ID, geoid, geogroup) |> 
+  filter(!is.na(geogroup)) |> 
+  select(-geoid)
+
+
+acc_site_data <- geo_df |> 
+  left_join(site_type) 
+
+
+load("data/coords.rda")
+
+
+assign_region_area_type <- function(df){
+  df |> 
+    group_by(ID, host, area_type) %>%
+    summarize(
+      total_pop = sum(total_pop, na.rm = TRUE)) |> 
+    filter(total_pop == max(total_pop)) |> 
+    select(ID, host, area_type)
+}
+
+region_area_type <- acc_site_data |> 
+  assign_region_area_type()
+
+acc_map_county <- acc_site_data %>%
+  filter(GEOLEVEL == "County") %>%
+  left_join(coords, by = c("geoid" = "GEOID")) |>
+  group_by(ID, geogroup, cohort_years, STATE_NAME) %>%
+  summarize(
+    latitude = mean(latitude),
+    longitude = mean(longitude),
+    host = first(host),
+    NAME = paste(NAME, collapse = ", ")
+  ) |> left_join(region_area_type)
+
+acc_map_place <- acc_site_data |> 
+  filter(GEOLEVEL == "Place") |> 
+  left_join(coords, by = c("geoid" = "GEOID")) |> 
+  select(names(acc_map_county))
+
+acc_map_state <- acc_site_data |> 
+  filter(GEOLEVEL == "State") |> 
+  left_join(coords, by = c("geoid" = "GEOID")) |> 
+  select(names(acc_map_county))
+
+acc_map_data <- rbind(acc_map_place, acc_map_state, acc_map_county) |> 
+  mutate(latitude = jitter(latitude, factor = 2),
+         longitude = jitter(longitude, factor = 2)) |> 
+  group_by(host) |> 
+  ungroup() |> 
+  select(ID, latitude, longitude, cohort_years, area_type)
+
+acc_site_data <- acc_site_data |> 
+  select(-area_type, -record_id) |> 
+  left_join(acc_map_data) |> 
+  distinct() |> 
+  filter(!is.na(geoid)) 
+
+
+area_type_options <- acc_site_data |> 
+  select(area_type) |> 
+  distinct() |> 
+  pull()
+
+all_years <- unlist(strsplit(unique(acc_site_data$cohort_years), ", "))
+
+cohort_years <- as.numeric(unique(all_years))
+
+
+updateSelectInput(session, "cohort", choices = cohort_years, selected = max(cohort_years, na.rm = TRUE))
+  updateSelectInput(session, "siteType", choices = unique(site_type$geogroup), selected = c("Local", "Regional", "State"))
+  updateSelectInput(session, "areaType", choices = area_type_options, selected = area_type_options)
+  observeEvent(acc_data_filtered(), {
+    updateSelectInput(session, "state", choices = unique(acc_data_filtered()$STATE_NAME), selected = NULL)
+  })
+  
+ 
+# ############### FILTER DATA ####################
+# 
+# 
+# 
+
+
+acc_data_filtered <- reactive({
+  acc_site_data |>
+    filter(geogroup %in% input$siteType,
+           if (!is.null(input$cohort) && length(input$cohort) > 0) { # Check if cohort is selected and not empty
+             str_detect(cohort_years, str_c(input$cohort, collapse = "|"))
+           } else {
+             TRUE  # Select all if no cohort is selected
+           },
+           area_type %in% c(input$areaType)
+    ) %>% 
+    filter(!is.na(cohort_years) & cohort_years != "") # Remove rows with empty cohort_years
+})
+
+filtered_data <- reactive({
+  if (is.null(input$state)) {
+    acc_data_filtered() |>
+      select(-c(cohort_years, ID, host, latitude, longitude)) |>
+      remove_duplicates() |>
+      distinct()
+
+  } else {
+    acc_data_filtered() |>
+      select(-c(cohort_years, ID, host, latitude, longitude)) |>
+      filter(STATE_NAME %in% input$state) |>
+      remove_duplicates() |>
+      distinct()
+  }
+
+
+})
+
+areas_served <- function(df){
+  df |> 
+    mutate(areas_served = ifelse(GEOLEVEL == "County", paste0(NAME, ", ", usdata::state2abbr(STATE_NAME), collapse = "; "), paste0(NAME, collapse = "; ")))
+}
+
+filtered_map <- reactive({
+  if (is.null(input$state)) {
+    acc_data_filtered() |>
+      group_by(host) |>
+      areas_served()|>
+      slice(1) |>
+      ungroup()
+  } else {
+    acc_data_filtered() |>
+      filter(STATE_NAME %in% input$state) |>
+      group_by(host) |>
+      areas_served()|>
+      slice(1) |>
+      ungroup()
+  }
+})
+
+
+observeEvent(acc_data_filtered(), {
+  updateSelectInput(session, "state", choices =  unique(acc_data_filtered()$STATE_NAME), selected = NULL)
+})
+
+
+##### Map data boxes #####
+
+output$host_site_count <- renderText({
+  nrow(filtered_map())
+})
+
+output$state_count <- renderText({
+  filtered_map() |> 
+    select(STATE_NAME) |> 
+    distinct() |> 
+    nrow()
+})
+
+output$recurring_count <- renderText({
+  filtered_map() |> 
+    filter(str_detect(cohort_years,",")) |> 
+    nrow()
+})
+
+
+##### Race viz #####
+
+race_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(group = "us") |> 
+  group_by(group) |> 
+  create_race_vars()
+
+race_df <- reactive({
+  filtered_data() |> 
+    mutate(group = "acc_sites") |> 
+    group_by(group) |> 
+    create_race_vars()|>  
+    rbind(race_us)  |> 
+    pivot_longer(White:Asian, names_to = "race") |>
+    pivot_wider(names_from = "group") |> 
+    mutate(race = str_wrap(race,20))
+  
+})
+
+output$data <- renderTable({
+  race_df()
+})
+
+output$race_plot <- renderPlotly({
+  plot_ly(race_df(),
+          y = ~acc_sites,
+          x = ~race,
+          type = 'bar',
+          name = "ACC",
+          marker = list(color = pal[1]))%>%
+    add_trace(y = ~us, name = "US",marker = list(color = pal[2])) %>%
+    layout(xaxis = list(title = ""), yaxis = list(title = "Share", tickformat = ".0%"), barmode = 'group')
+})
+
+#### Total population viz ####
+
+total_pop <- reactive({
+  
+  sum(filtered_data()$total_pop)
+  
+})
+
+output$total_pop_txt <- renderText({
+  scales::comma(total_pop())
+})
+
+#### Viz Histogram ####
+
+
+calc_bins <- function(df){
+  bins <- round((max(df$total_pop, na.rm = TRUE)-min(df$total_pop, na.rm = TRUE))/(2 * IQR(df$total_pop, na.rm = TRUE) / length(df$total_pop)^(1/3)))
+}
+
+
+bins <- reactive({
+  calc_bins(filtered_data())
+})
+
+output$pop_histogram <- renderPlotly({
+  plot_ly(x = ~filtered_data()$total_pop, type = "histogram", nbinsx=bins(), marker = list(color = pal[1]))  %>% layout(xaxis = list(title = "")) %>% layout(hovermode = 'x')
+})
+
+# Area types
+
+area_type_count_df <- reactive({
+  filtered_data() |> 
+    group_by(area_type) |> 
+    summarize(
+      count = n()
+    )
+})
+
+
+area_type_df <- reactive({
+  filtered_data() |> 
+    group_by(area_type) |> 
+    summarize(
+      count = n(),
+      pop = sum(total_pop, na.rm = TRUE),
+      share = pop/total_pop())
+})
+
+
+output$count_area_type <- renderPlotly({
+  plot_ly(area_type_df(),
+          x = ~count,
+          y = ~area_type,
+          type = 'bar',
+          orientation = 'h', marker = list(color = pal[1])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Areas Served"), barmode = 'group', margin = list(l = 100))
+})
+
+output$pop_area_type <- renderPlotly({
+  plot_ly(area_type_df(),
+          x = ~pop,
+          y = ~area_type,
+          type = 'bar',
+          orientation = 'h',
+          hovertemplate = '%{x:.2s}<extra></extra>',
+          marker = list(color = pal[1])
+  ) %>%
+    layout(yaxis = list(title = ""), 
+           xaxis = list(title = "Population Served"), 
+           barmode = 'group', 
+           margin = list(l = 100),
+           hovermode = 'closest' ) 
+})
+
+output$share_area_type <- renderPlotly({
+  plot_ly(area_type_df(),
+          x = ~share,
+          y = ~area_type,
+          type = 'bar',
+          orientation = 'h',
+          marker = list(color = pal[1])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Share of Population Served", tickformat = ".0%"), barmode = 'group', margin = list(l = 100))
+})
+
+###### Age #####
+
+
+age_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(share_65_plus = pop_65_older/total_pop,
+         group = "us") |> 
+  select(group, share_65_plus)
+
+age_df <- reactive({
+  filtered_data() |> 
+    mutate(group = "acc_sites") |> 
+    group_by(group) |> 
+    summarize(share_65_plus = sum(pop_65_older, na.rm = TRUE)/sum(total_pop, na.rm = TRUE)) |> 
+    rbind(age_us) |> 
+    mutate(var = "65 and older") |> 
+    pivot_wider(names_from = group, values_from = share_65_plus)
+})
+
+
+output$age_65 <- renderPlotly({
+  plot_ly(age_df(),
+          x = ~acc_sites,
+          y = ~var,
+          type = 'bar',
+          orientation = 'h',
+          name = "ACC",
+          marker = list(color = pal[1])) %>%
+    add_trace(x = ~us, name = "US",marker = list(color = pal[2])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Share", tickformat = ".0%"), barmode = 'group') 
+  
+})
+
+####### Bach Plus #####
+
+bach_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(bach_plus = bach_plus/pop_25_older,
+         group = "us") |> 
+  select(group, bach_plus)
+
+bach_df <- reactive({
+  filtered_data() |> 
+    mutate(group = "acc_sites") |> 
+    group_by(group) |> 
+    summarize(bach_plus = sum(bach_plus, na.rm = TRUE)/sum(pop_25_older, na.rm = TRUE)) |> rbind(bach_us) |> 
+    mutate(var = "Population with a bachelor's degree") |> 
+    pivot_wider(names_from = group, values_from = bach_plus)
+})
+
+
+output$bach <- renderPlotly({
+  plot_ly(bach_df(),
+          x = ~acc_sites,
+          y = ~var,
+          type = 'bar',
+          orientation = 'h',
+          name = "ACC",
+          marker = list(color = pal[1])) %>%
+    add_trace(x = ~us, name = "US", marker = list(color = pal[2])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Share", tickformat = ".0%"), barmode = 'group') 
+  
+})
+
+######### SVI #############
+
+svi_local <- reactive({
+  filtered_data() |>
+    filter(geogroup %in% c("Local", "Regional")) |>
+    group_by(svi_level) |>
+    summarize(svi_pop = sum(total_pop)) |>
+    ungroup()
+})
+
+svi_state <- reactive({
+  filtered_data() |>
+    filter(geogroup %in% c("State")) |>
+    select(svi_high, svi_med_high, svi_med_low, svi_low) |>
+    pivot_longer(cols = svi_high:svi_low, names_to = "svi_level", values_to = "svi_pop_state") |>
+    mutate(svi_level = str_replace(svi_level, "svi_", "")) |>
+    group_by(svi_level) |>
+    summarize(svi_pop_state = sum(svi_pop_state, na.rm = TRUE))
+})
+
+svi_df <- reactive({
+  selected_groups <- input$siteType
+  
+  # Calculate svi_local if necessary
+  if ("Local" %in% selected_groups || "Regional" %in% selected_groups) {
+    svi_local_df <- svi_local()
+  } else {
+    svi_local_df <- data.frame(svi_level = character(), svi_pop = numeric())
+  }
+  
+  # Calculate svi_state if necessary
+  if ("State" %in% selected_groups) {
+    svi_state_df <- svi_state()
+  } else {
+    svi_state_df <- data.frame(svi_level = character(), svi_pop_state = numeric())
+  }
+  
+  # Combining dataframes
+  full_join(svi_local_df, svi_state_df, by = "svi_level") |> 
+    mutate(svi_total = coalesce(svi_pop, 0) + coalesce(svi_pop_state, 0),
+           svi_share = svi_total/sum(svi_total, na.rm = TRUE)) |> 
+    mutate(svi_level = case_when(
+      svi_level == "high" ~ "High",
+      svi_level == "med_high" ~ "Medium High",
+      svi_level == "med_low" ~ "Medium Low", 
+      svi_level == "low" ~ "Low"
+    ))
+})
+
+
+output$svi_share <- renderPlotly({
+  plot_ly(svi_df(),
+          y = ~svi_share,
+          x = ~svi_level,
+          type = 'bar',
+          name = "ACC",
+          hovertemplate = '%{x} | %{y:.1%}<extra></extra>',
+          marker = list(color = pal[1]))%>%
+    layout(xaxis = list(title = "",
+                        categoryorder = 'array',
+                        categoryarray = ~unique(svi_df()$svi_level)[c(1,3,4,2)]), yaxis = list(title = "Percent",tickformat = ".0%"), barmode = 'group')
+})
+
+output$svi_total <- renderPlotly({
+  plot_ly(svi_df(),
+          y = ~svi_total,
+          x = ~svi_level,
+          type = 'bar',
+          hovertemplate = '%{x} | %{y:.2s}<extra></extra>',
+          marker = list(color = pal[1]))%>%
+    layout(xaxis = list(title = "",
+                        categoryorder = 'array',
+                        categoryarray = ~unique(svi_df()$svi_level)[c(1,3,4,2)]), yaxis = list(title = "Total", hovermode = "closest"), barmode = 'group')
+})
+
+output$svi_description <- renderText({"<p>The Social Vulnerability Index (SVI) is a tool created by the Centers for Disease Control and Prevention (CDC) to help identify communities that may be more vulnerable to the negative impacts of disasters. The SVI uses U.S. Census data to rank each area based on factors including socioeconomic status, household characteristics, racial and ethnic minority status, housing type, and transportation. More info at <a href=\"https://www.atsdr.cdc.gov/placeandhealth/svi/index.html\" target=\"_blank\">CDC/ATSDR Social Vulnerability Index (SVI)</a></p>"})
+
+############## Income ################
+
+us_median <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(US = median_income) |> 
+  select(US)
+
+median_income <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    summarize(ACC = weighted.mean(median_income, total_households, na.rm = TRUE)) |> cbind(us_median)
+})
+
+output$median_income <- renderPlotly({
+  plot_ly(median_income(),
+          x = ~ACC,
+          y = ~"ACC",
+          type = 'bar',
+          orientation = 'h',
+          name = "ACC",
+          marker = list(color = pal[1])) %>%
+    add_trace(x = ~US, y = ~"US", name = "US", marker = list(color = pal[2])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Median Income", tickformat = "$,.0f"), barmode = 'group') 
+  
+})
+
+#################### Poverty ##############
+
+poverty <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    summarize(ACC = weighted.mean(poverty/100, total_households, na.rm = TRUE)) |> 
+    mutate(US = final_df |> 
+             filter(NAME == "United States") |> 
+             mutate(poverty = poverty/100) |>
+             pull(poverty))
+})
+
+output$poverty <- renderPlotly({
+  plot_ly(poverty(),
+          x = ~ACC,
+          y = ~"ACC",
+          type = 'bar',
+          orientation = 'h',
+          name = "ACC",
+          marker = list(color = pal[1])) %>%
+    add_trace(x = ~US, y = ~"US", name = "US", marker = list(color = pal[2])) %>%
+    layout(yaxis = list(title = ""), xaxis = list(title = "Poverty Rate", tickformat = ".0%"), barmode = 'group') 
+  
+})
+
+
+################### DIGITAL CONNECTIVITY SETUP #######################
+
+gauge_pal <-c("#60bc68", "#bb623c")
+
+
+
+
+#################### 25/3 broadband #############
+
+bb_25_3 <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    mutate(units_25_3 = total_units*pct_served_25_3) |> 
+    summarize(served = sum(units_25_3),
+              share_served = round(served/sum(total_units)*100,1),
+              unserved = round(sum((total_pop/total_units)*total_units*(1-pct_served_25_3)),1))
+  
+})
+
+bb_25_3_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(served = total_units*pct_served_25_3,
+         share_served = round(served/sum(total_units)*100,1),
+         unserved = round((total_pop/total_units)*total_units*(1-pct_served_25_3),1))
+
+output$gauge_25_3 <- renderPlotly({
+  
+  plot_ly(
+    domain = list(x = c(0, 1), y = c(0, 1)),
+    value = bb_25_3()$share_served,
+    number = list(suffix = "%"),
+    title = list(text = "% with 25/3 option"),
+    type = "indicator",
+    mode = "gauge+number",
+    gauge = list(
+      axis =list(range = list(NULL, 100)),
+      bar = list(color = gauge_pal[1]),
+      steps = list(
+        list(range = c(0, bb_25_3_us$share_served), color = "lightgray")),
+      threshold = list(
+        line = list(color = gauge_pal[2], width = 4),
+        thickness = 0.75,
+        value = bb_25_3_us$share_served))) 
+  
+})
+
+
+output$unserved_25_3 <- renderText({
+  scales::comma(bb_25_3()$unserved)
+})
+
+
+
+#################### 100/20 broadband #############
+
+bb_100_20 <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    mutate(units_100_20 = total_units*pct_served_100_20) |> 
+    summarize(served = sum(units_100_20),
+              share_served = round(served/sum(total_units)*100,1),
+              unserved = round(sum((total_pop/total_units)*total_units*(1-pct_served_100_20)),1))
+  
+})
+
+bb_100_20_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(served = total_units*pct_served_100_20,
+         share_served = round(served/sum(total_units)*100,1),
+         unserved = round((total_pop/total_units)*total_units*(1-pct_served_100_20),1))
+
+output$gauge_100_20 <- renderPlotly({
+  
+  
+  plot_ly(
+    domain = list(x = c(0, 1), y = c(0, 1)),
+    value = bb_100_20()$share_served,
+    number = list(suffix = "%"),
+    title = list(text = "% with 100/20 option"),
+    type = "indicator",
+    mode = "gauge+number",
+    gauge = list(
+      axis =list(range = list(NULL, 100)),
+      bar = list(color = gauge_pal[1]),
+      steps = list(
+        list(range = c(0, bb_100_20_us$share_served), color = "lightgray")),
+      threshold = list(
+        line = list(color = gauge_pal[2], width = 4),
+        thickness = 0.75,
+        value = bb_100_20_us$share_served))) 
+  
+})
+
+output$unserved_100_20 <- renderText({
+  scales::comma(bb_100_20()$unserved)
+})
+
+
+#################### 1000/100 broadband #############
+
+bb_1000_100 <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    mutate(units_1000_100 = total_units*pct_served_1000_100) |> 
+    summarize(served = sum(units_1000_100),
+              share_served = round(served/sum(total_units)*100,1),
+              unserved = round(sum((total_pop/total_units)*total_units*(1-pct_served_1000_100)),1))
+  
+})
+
+bb_1000_100_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(served = total_units*pct_served_1000_100,
+         share_served = round(served/sum(total_units)*100,1),
+         unserved = round((total_pop/total_units)*total_units*(1-pct_served_1000_100),1))
+
+output$gauge_1000_100 <- renderPlotly({
+  
+  plot_ly(
+    domain = list(x = c(0, 1), y = c(0, 1)),
+    value = bb_1000_100()$share_served,
+    number = list(suffix = "%"),
+    title = list(text = "% with 1000/10 option"),
+    type = "indicator",
+    mode = "gauge+number",
+    gauge = list(
+      axis =list(range = list(NULL, 100)),
+      bar = list(color = gauge_pal[1]),
+      steps = list(
+        list(range = c(0, bb_1000_100_us$share_served), color = "lightgray")),
+      threshold = list(
+        line = list(color = gauge_pal[2], width = 4),
+        thickness = 0.75,
+        value = bb_1000_100_us$share_served))) 
+  
+})
+
+output$unserved_1000_100 <- renderText({
+  scales::comma(bb_1000_100()$unserved)
+})
+
+######################## Broadband Subscription #############
+
+bb_us <- final_df |> 
+  filter(NAME == "United States") |> 
+  mutate(wo_bb = sum(total_households - hh_w_bb),
+         wo_comp = sum(total_households - hh_w_computer),
+         wo_bb_share = wo_bb/sum(total_households),
+         wo_comp_share = wo_comp/sum(total_households),
+         wo_bb_pop = sum(total_households - hh_w_bb)*sum(total_pop)/sum(total_households),
+         wo_comp_pop = sum(total_households - hh_w_computer)*sum(total_pop)/sum(total_households)
+  ) |> 
+  select(wo_bb_share,  wo_comp_share, wo_bb_pop, wo_comp_pop) |> 
+  mutate(group = "US") 
+
+bb_subscribe <- reactive({
+  filtered_data() |> 
+    ungroup() |> 
+    summarize(wo_bb = sum(total_households - hh_w_bb),
+              wo_comp = sum(total_households - hh_w_computer),
+              wo_bb_share = wo_bb/sum(total_households),
+              wo_comp_share = wo_comp/sum(total_households),
+              wo_bb_pop = sum(total_households - hh_w_bb)*sum(total_pop)/sum(total_households),
+              wo_comp_pop = sum(total_households - hh_w_computer)*sum(total_pop)/sum(total_households)
+    ) |> 
+    mutate(group = "ACC") |>
+    select(group, wo_bb_share,  wo_comp_share, wo_bb_pop, wo_comp_pop) |> 
+    rbind(bb_us) |> 
+    pivot_longer(cols = wo_bb_share:wo_comp_pop, names_to = "metric", values_to = "value") |> pivot_wider(names_from  = group, values_from = value) |> 
+    mutate(metric = case_when(
+      metric == "wo_bb_share" ~ "% without broadband",
+      metric == "wo_comp_share" ~ "% without a computer",
+      metric == "wo_bb_pop" ~ "Population without broadband",
+      metric == "wo_comp_pop" ~ "Population without a computer"
+    ))
+  
+})
+
+output$bb_share <- renderPlotly({
+  plot_ly(bb_subscribe() |> filter(str_detect(metric, "%")),
+          y = ~ACC,
+          x = ~metric,
+          type = 'bar',
+          name = "ACC",
+          hovertemplate = '%{x} | %{y:.1%}',
+          marker = list(color = pal[1]))%>%
+    add_trace(y= ~US, type = 'bar', name = "US",marker = list(color = pal[2])) %>%
+    layout(xaxis = list(title = ""),
+           yaxis = list(title = "Percent",tickformat = ".0%"), barmode = 'group')
+})
+
+
+output$wo_broadband <- renderText({
+  scales::comma(bb_subscribe() |> filter(metric == "Population without broadband") |> pull(ACC))
+})
+
+output$wo_computer <- renderText({
+  scales::comma(bb_subscribe() |> filter(metric == "Population without a computer") |> pull(ACC))
+})
+
+################### Broadband Affordability ##############
+
+bb_not_afford <- reactive({
+  filtered_data() |>
+    ungroup() |>
+    summarize(
+      not_afford_25 = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households
+      ),
+      not_afford_58 = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households
+      ),
+      not_afford_83 = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households + inc_35k_50k /
+          100 * total_households
+      ),
+      not_afford_125 = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households + inc_35k_50k /
+          100 * total_households + inc_50k_75k / 100 * total_households
+      ),
+      not_afford_25_share = not_afford_25 / sum(total_households),
+      not_afford_58_share = not_afford_58 / sum(total_households),
+      not_afford_83_share = not_afford_83 / sum(total_households),
+      not_afford_125_share = not_afford_125 / sum(total_households)
+    )
+})
+
+bb_not_afford_share <- reactive({
+  bb_not_afford() |>
+    select(not_afford_25_share:not_afford_125_share) |>
+    pivot_longer(
+      cols = not_afford_25_share:not_afford_125_share,
+      names_to = "metric",
+      values_to = "value"
+    ) |>
+    mutate(
+      metric = case_when(
+        metric == "not_afford_25_share" ~ "Cannot afford $25 per month",
+        metric == "not_afford_58_share" ~ "Cannot afford $58 per month",
+        metric == "not_afford_83_share" ~ "Cannot afford $83 per month",
+        metric == "not_afford_125_share" ~ "Cannot afford $125 per month"
+      )
+    ) |> 
+    mutate(metric = factor(metric, levels = c("Cannot afford $25 per month", "Cannot afford $58 per month", "Cannot afford $83 per month", "Cannot afford $125 per month")))
+  
+})
+
+bb_not_afford_total <- reactive({
+  bb_not_afford() |>
+    select(not_afford_25:not_afford_125) |>
+    pivot_longer(
+      cols = not_afford_25:not_afford_125,
+      names_to = "metric",
+      values_to = "value"
+    ) |>
+    mutate(
+      metric = case_when(
+        metric == "not_afford_25" ~ "Cannot afford $25 per month",
+        metric == "not_afford_58" ~ "Cannot afford $58 per month",
+        metric == "not_afford_83" ~ "Cannot afford $83 per month",
+        metric == "not_afford_125" ~ "Cannot afford $125 per month"
+      )
+    ) |> 
+    mutate(metric = factor(metric, levels = c("Cannot afford $25 per month", "Cannot afford $58 per month", "Cannot afford $83 per month", "Cannot afford $125 per month")))
+  
+})
+
+output$not_afford_share <- renderPlotly({
+  plot_ly(bb_not_afford_share(),
+          y = ~value,
+          x = ~metric,
+          type = 'bar',
+          name = "ACC",
+          hovertemplate = '%{x} | %{y:.1%}<extra></extra>',
+          marker = list(color = pal[1]))%>%
+    layout(xaxis = list(title = ""),
+           yaxis = list(title = "Percent of Households",tickformat = ".0%"))
+})
+
+output$not_afford_total <- renderPlotly({
+  plot_ly(bb_not_afford_total(),
+          y = ~value,
+          x = ~metric,
+          type = 'bar',
+          name = "ACC",
+          hovertemplate = '%{x} | %{y:.2s}<extra></extra>',
+          marker = list(color = pal[1]))%>%
+    layout(xaxis = list(title = ""),
+           yaxis = list(title = "Total Households"))
+})
+
+output$broadband_afford_description <- renderText({"<p>Whether a household can afford a broadband subscription at a given price is based on whether the price exceeds 2% of monthly household income. This threshold is drawn from international standards of affordability established by the Broadband Commission for Sustainable Development. More info at <a href=\"https://www.itu.int/dms_pub/itu-s/opb/pol/S-POL-BROADBAND.20-2019-PDF-E.pdf\" target=\"_blank\">The State of Broadband 2019: Broadband as a Foundation for Sustainable Development (ITU)</a> </p>"})
+
+#################### MAP #####################
+
+geo_groups <- c("Local", "Regional", "State")
+
+map_pal <- colorFactor(pal, domain = geo_groups)
+
+output$map <- renderLeaflet({
+  leaflet(filtered_map()) %>%
+    addTiles(
+      urlTemplate = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      attribution = 'Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    ) %>%
+    addCircleMarkers(
+      lng = ~longitude,
+      lat = ~latitude,
+      radius = 10,
+      popup = ~paste("<b>", host,"</b>", "<br>", areas_served, "<br>", "<b>Cohorts:</b>", cohort_years),
+      layerId = ~ID,
+      color = ~map_pal(geogroup),
+      fillOpacity = .6,
+    ) %>%
+    addLegend(
+      "bottomright", 
+      colors = pal,
+      label = geo_groups,
+      title = "Host Type",
+      opacity = 1
+    )
+})
+
+
+
+
+
+######## DATA TABLES ##############
+
+calc_metrics <- function(df, var){
+  
+  df_list <- list(
+    total_pop = df |> group_by({{ var }}) |> summarize(total_pop = sum(total_pop)),
+    aian_share = df |> group_by({{ var }}) |> summarize(aian_share = sum(aian_combo)/sum(total_pop)),
+    asian_share = df |> group_by({{ var }}) |> summarize(asian_share = sum(asian_combo)/sum(total_pop)),
+    black_share = df |> group_by({{ var }}) |> summarize(black_share = sum(black_combo)/sum(total_pop)),
+    hispanic_share = df |> group_by({{ var }}) |> summarize(hispanic_share = sum(hispanic)/sum(total_pop)),
+    nhpi_share = df |> group_by({{ var }}) |> summarize(nhpi_share = sum(nhpi_combo)/sum(total_pop)),
+    white_share = df |> group_by({{ var }}) |> summarize(white_share = sum(white_combo)/sum(total_pop)),
+    pop_65_older_share = df |> group_by({{ var }}) |> summarize(pop_65_older_share = sum(pop_65_older)/sum(total_pop)),
+    bach_plus_share = df |> group_by({{ var }}) |> summarize(bach_plus_share = sum(bach_plus)/sum(pop_25_older)),
+    svi = {
+      #Local and regional SVI
+      svi_local_df <- df |> 
+        filter(geogroup %in% c("Local", "Regional")) |>
+        group_by({{var}}, svi_level) |>
+        summarize(svi_pop = sum(total_pop, na.rm = TRUE)) |>
+        ungroup()
+      
+      svi_state_df <- df |> 
+        filter(geogroup %in% c("State")) |>
+        select({{var}}, svi_high, svi_med_high, svi_med_low, svi_low) |>
+        pivot_longer(cols = starts_with("svi_"), names_to = "svi_level", values_to = "svi_pop_state") |>
+        mutate(svi_level = str_replace(svi_level, "svi_", "")) |>
+        group_by({{var}}, svi_level) |>
+        summarize(svi_pop_state = sum(svi_pop_state, na.rm = TRUE))
+      
+      # Combine and Summarize
+      combined <- full_join(svi_local_df, svi_state_df, by = c(as.character(substitute(var)), "svi_level")) |>
+        mutate(svi_total = coalesce(svi_pop, 0) + coalesce(svi_pop_state, 0)) |>
+        group_by({{var}}) |>
+        mutate(svi_share = svi_total / sum(svi_total, na.rm = TRUE)) |>
+        select({{var}}, svi_level, svi_share, svi_total) |>
+        pivot_wider(names_from = c(svi_level), values_from = c(svi_share, svi_total)) 
+      
+      replace(combined, is.na(combined), 0)},
+    poverty_share = df |> group_by({{ var }}) |> summarize(poverty_rate = weighted.mean(poverty, total_pop) / 100),
+    median_income = df |> group_by({{ var }}) |> summarize(median_income = weighted.mean(median_income, total_pop)),
+    wo_bb_sub_total = df |> group_by({{ var }}) |> summarize(wo_bb_sub_total = sum(total_households - hh_w_bb) * sum(total_pop) / sum(total_households)),
+    wo_bb_sub_share = df |> group_by({{ var }}) |> summarize(wo_bb_sub_share = sum(total_households - hh_w_bb) / sum(total_households)),
+    wo_comp_total = df |> group_by({{ var }}) |> summarize(wo_comp_total = sum(total_households - hh_w_computer) * sum(total_pop) / sum(total_households)),
+    wo_comp_share = df |> group_by({{ var }}) |> summarize(wo_comp_share = sum(total_households - hh_w_computer) / sum(total_households)),
+    access_25_3 = df |> group_by({{ var }}) |> 
+      mutate(units_25_3 = total_units*pct_served_25_3) |>
+      summarize(served_25_3_total = sum(units_25_3),
+                served_25_3_share = served_25_3_total/sum(total_units),
+                unserved_25_3_total = sum((total_pop/total_units)*total_units*(1-pct_served_25_3))),
+    access_100_20 = df |> group_by({{ var }}) |> 
+      mutate(units_100_20 = total_units*pct_served_100_20) |>
+      summarize(served_100_20_total = sum(units_100_20),
+                served_100_20_share = served_100_20_total/sum(total_units),
+                unserved_100_20_total = sum((total_pop/total_units)*total_units*(1-pct_served_100_20))),
+    access_1000_100 = df |> group_by({{ var }}) |> 
+      mutate(units_1000_100 = total_units*pct_served_1000_100) |>
+      summarize(served_1000_100_total = sum(units_1000_100),
+                served_1000_100_share = served_1000_100_total/sum(total_units),
+                unserved_1000_100_total = sum((total_pop/total_units)*total_units*(1-pct_served_1000_100))), 
+    bb_not_afford = df |> group_by({{ var }}) |> summarize(
+      not_afford_25_total = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households
+      ),
+      not_afford_58_total = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households
+      ),
+      not_afford_83_total = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households + inc_35k_50k /
+          100 * total_households
+      ),
+      not_afford_125_total = sum(
+        inc_less_10k / 100 * total_households + inc_10k_15k / 100 * total_households + inc_15k_25k /
+          100 * total_households + inc_25k_35k / 100 * total_households + inc_35k_50k /
+          100 * total_households + inc_50k_75k / 100 * total_households
+      ),
+      not_afford_25_share = not_afford_25_total / sum(total_households),
+      not_afford_58_share = not_afford_58_total / sum(total_households),
+      not_afford_83_share = not_afford_83_total / sum(total_households),
+      not_afford_125_share = not_afford_125_total / sum(total_households)
+    )
+  )
+  
+  df <- bind_rows(df_list) |>
+    pivot_longer(cols = -{{var}}, names_to = "metric", values_to = "value") |>
+    filter(!is.na(value)) |> 
+    # Rounding logic
+    mutate(value = case_when(
+      str_detect(metric, "_share") ~ round(value, 3),  # 3 decimal places for share
+      str_detect(metric, "_total|_income") ~ round(value, 0),  # Whole numbers for total
+      TRUE ~ value  # Leave other metrics unchanged
+    )) |>
+    pivot_wider(names_from = metric, values_from = value)
+  
+  
+  return(df)
+  
+}
+
+
+base_names_host <- acc_site_data |>
+  group_by(host) |>
+  mutate(areas_served = paste(NAME, collapse = ", "),
+         states_served = paste(STATE_NAME, collapse = ", ")) |> 
+  select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -c(ID)) |> 
+  names()
+
+base_names_area <- acc_site_data |> 
+  select(geoid:GEOLEVEL,STATE_NAME,area_type, -c(ID, host, cohort_years)) |> 
+  names()
+
+output$area_table <- DT::renderDataTable({
+  filtered_data() |> 
+    select(all_of(base_names_area)) |> 
+    left_join(calc_metrics(filtered_data(),geoid), by = "geoid")
+})
+
+output$host_table <- DT::renderDataTable({
+    acc_data_filtered() |>
+    group_by(host) |>
+    areas_served() |> 
+    mutate(states_served = paste(unique(STATE_NAME), collapse = ", ")) |> 
+    select(base_names_host) |> 
+    left_join(calc_metrics(acc_data_filtered(),host), by = "host") |> 
+    distinct()
+})
+
+output$download_tables <- downloadHandler(
+  filename = function() {
+    paste0("acc-data-", Sys.Date(), ".xlsx") 
+  },
+  content = function(file) {
+    # Get the data from the datatables
+    area_data <- filtered_data() %>% 
+      select(all_of(base_names_area)) %>% 
+      left_join(calc_metrics(filtered_data(), geoid), by = "geoid")
+    host_data <- acc_data_filtered() %>% 
+      select(base_names_host) %>% 
+      left_join(calc_metrics(acc_data_filtered(), host), by = "host") %>% 
+      distinct()
+    
+    filter_data <- data.frame(
+      Filter = c("Site Type", "Cohort", "Area Type", "State"),
+      Value = c(
+        paste(input$siteType, collapse = ", "),
+        paste(input$cohort, collapse = ", "),
+        paste(input$areaType, collapse = ", "),
+        ifelse(is.null(input$state), "All", paste(input$state, collapse = ", "))
+      )
+    )
+    
+    # Create the workbook
+    wb <- createWorkbook()
+    
+    # Add data sheets
+    addWorksheet(wb, "Area Data")
+    writeData(wb, "Area Data", area_data)
+    addWorksheet(wb, "Host Data")
+    writeData(wb, "Host Data", host_data)
+    
+    # Add filter sheet
+    addWorksheet(wb, "Filters Used")
+    writeData(wb, "Filters Used", filter_data)
+    
+    # Save the workbook
+    saveWorkbook(wb, file)
+  }
+)
+
+output$download_ui <- renderUI({
+  div(class = "toolbar-button", downloadButton("download_tables", "Download Data"))
+})
+
+output$data_tables_description <- renderText({"<p>Two tables are available for viewing and downloading the dashboard data. The <b>\"Areas used to calculate data\"</b> includes the unique geographic areas used to calculate data based on the current filters. De-duplication proceedures have been applied so populations are not double counted when geographies overlap. Metrics are calculated for each area included in the filter.</p>
+  
+<p>The <b>\"Host sites included in filter\"</b> table includes all unique host sites included in the filter. Data is calculated for each host site, aggregating data across multiple areas when mutiple geographic areas are served.</p>"})
+
+
+
+
+```

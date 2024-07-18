@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Renviron
+rsconnect/
+acc_dashboard_files/
+data/
+source/
+DO NOT INCLUDE/
