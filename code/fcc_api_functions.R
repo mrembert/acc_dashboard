@@ -1,83 +1,84 @@
-get_fcc_as_of_dates_list <- function(api_username = Sys.getenv('FCC_USERNAME'), api_key=Sys.getenv("FCC_API_KEY")) {
-  # Base URL
+get_fcc_as_of_dates_list <- function(api_username = Sys.getenv("FCC_USERNAME"), api_key = Sys.getenv("FCC_API_KEY")) {
   base_url <- "https://broadbandmap.fcc.gov/api/public/map/"
+  api_url <- paste0(base_url, "listAsOfDates")
   
-  # Construct the API URL
-  api_url <- paste0(base_url, "/listAsOfDates")
-  
-  # API Request 
   response <- httr::GET(url = api_url, 
-                        add_headers(username = api_username, hash_value = api_key))
+                        httr::add_headers(username = api_username, hash_value = api_key))
   
-  # Error handling
-  if (response$status_code != 200) {
-    stop("API request failed to get 'as of dates' list. Error: ", httr::content(response, as = "text"))
+  if (httr::http_error(response)) {
+    stop("API request failed to get 'as of dates' list. Status code: ", 
+         httr::status_code(response), "\nError: ", 
+         httr::content(response, as = "text", encoding = "UTF-8"))
   }
   
-  # Parse the JSON response
-  dates_list <- jsonlite::fromJSON(httr::content(response, as = "text"))
+  dates_list <- jsonlite::fromJSON(httr::content(response, as = "text", encoding = "UTF-8"))
   
-  # Return as a data frame
-  return(as.data.frame(dates_list$data))
+  return(dates_list$data)
 }
 
-
-get_fcc_availability_file_list <- function(as_of_date, category = NULL, subcategory = NULL, api_username = Sys.getenv('FCC_USERNAME'), api_key=Sys.getenv("FCC_API_KEY")) {
-  # Validate input
+get_fcc_availability_file_list <- function(as_of_date, category = NULL, subcategory = NULL, api_username = Sys.getenv("FCC_USERNAME"), api_key = Sys.getenv("FCC_API_KEY")) {
   if (is.null(as_of_date)) {
     stop("Please provide a valid 'as_of_date' in the format YYYY-MM-DD.")
   }
   
-  # Base URL
   base_url <- "https://broadbandmap.fcc.gov/api/public/map/downloads"
-  
-  # Construct the API URL
   api_url <- paste0(base_url, "/listAvailabilityData/", as_of_date)
   
-  # API Request 
-  response <- httr::GET(url = api_url, 
-                        query = list(category = category, subcategory = subcategory),
-                        add_headers(username = api_username, hash_value = api_key))
-  
-  # Error handling
-  if (response$status_code != 200) {
-    stop("API request failed to get file list. Error: ", httr::content(response, as = "text"))
+  query_params <- list()
+  if (!is.null(category)) {
+    query_params$category <- category
+  }
+  if (!is.null(subcategory)) {
+    query_params$subcategory <- subcategory
   }
   
-  # Parse the JSON response
-  file_list <- jsonlite::fromJSON(httr::content(response, as = "text"))
+  response <- httr::GET(url = api_url, 
+                        query = query_params,
+                        httr::add_headers(username = api_username, hash_value = api_key))
   
-  # Return as a data frame
-  return(as.data.frame(file_list$data))
+  if (httr::http_error(response)) {
+    stop("API request failed to get file list. Status code: ", 
+         httr::status_code(response), "\nError: ", 
+         httr::content(response, as = "text", encoding = "UTF-8"))
+  }
+  
+  file_list <- jsonlite::fromJSON(httr::content(response, as = "text", encoding = "UTF-8"))
+  
+  return(file_list$data)
 }
 
-
-get_fcc_availability_file <- function(file_id, file_name, api_username = Sys.getenv('FCC_USERNAME'), api_key=Sys.getenv("FCC_API_KEY")) {
-  # Base URL (no change here)
+get_fcc_availability_file <- function(file_id, file_name, api_username = Sys.getenv("FCC_USERNAME"), api_key = Sys.getenv("FCC_API_KEY")) {
   base_url <- "https://broadbandmap.fcc.gov/api/public/map/downloads/downloadFile"
+  api_url <- paste0(base_url, "/availability/", file_id, "/1")  # Assuming ESRI Shapefile format
   
-  # Construct API URL (no change here)
-  api_url <- paste0(base_url, "/availability/", file_id)
+  local_file_path <- file.path("source", "bb", paste0(file_name, ".zip")) # The API returns a zip file
   
-  # File name for download and reading
-  local_file_path <- file.path("source", "bb", paste0(file_name, ".csv"))  # Use file.path for better path handling
-  
-  # API Request with direct writing to local file path
   response <- httr::GET(
     url = api_url,
-    add_headers(username = api_username, hash_value = api_key),
-    write_disk(local_file_path, overwrite = TRUE),  # Write directly to the .csv
-    progress()
+    httr::add_headers(username = api_username, hash_value = api_key),
+    httr::write_disk(local_file_path, overwrite = TRUE),
+    httr::progress()
   )
   
-  # Error handling (no change here)
-  if (response$status_code != 200) {
-    stop("API request failed to get file list. Error: ", httr::content(response, as = "text"))
+  if (httr::http_error(response)) {
+    stop("API request failed to download file. Status code: ", 
+         httr::status_code(response), "\nError: ", 
+         httr::content(response, as = "text", encoding = "UTF-8"))
   }
   
-  # Read the downloaded file
-  bb_file <- read_csv(local_file_path) |> 
-    mutate(geography_id = as.character(geography_id))
+  # Unzip the downloaded file (you might need to adjust the path)
+  unzip(local_file_path, exdir = file.path("source", "bb"))
+  
+  # You'll need to figure out the exact name of the CSV file inside the zip
+  # This is a placeholder; replace with the actual CSV file name
+  csv_file_name <- list.files(file.path("source", "bb"), pattern = "\\.csv$", full.names = TRUE)[1] 
+  
+  if (length(csv_file_name) == 0) {
+    stop("No CSV file found in the downloaded zip archive.")
+  }
+  
+  bb_file <- readr::read_csv(csv_file_name) |> 
+    dplyr::mutate(across(where(is.character), as.character)) # Assuming you want to convert all character columns to character type
   
   return(bb_file)
 }
