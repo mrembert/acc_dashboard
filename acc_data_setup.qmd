@@ -5,26 +5,6 @@ editor: visual
 ---
 
 ```{r}
-#| label: Install latest tidycensus
-
-available_versions <- available.packages()[, "Version"]
-installed_version <- packageVersion("tidycensus")
-package_available_versions <-
-  available.packages()[available.packages()[, "Package"] == "tidyverse", "Version"]
-
-# Compare versions
-if (packageVersion("tidyverse") < package_available_versions) {
-  message(paste0("Updating package '", "tidycensus", "'..."))
-  install.packages("tidycensus")
-  message(paste0("Package '", "tidycensus", "' updated to the latest version."))
-} else {
-  message(paste0("Package '", "tidycensus", "' is already up-to-date."))
-}
-
-
-```
-
-```{r}
 #| label: Setup
 
 library(tidyverse)
@@ -34,6 +14,8 @@ library(tigris)
 library(sf)
 
 source("code/fcc_api_functions.R")
+
+current_acs <- 2023
 
 ```
 
@@ -186,8 +168,8 @@ vars_current <- c(
 #   emp_pop_16_older = "S2301_C03_001"
 # )
 
-current_acs <- formals(get_acs)
-current_acs <- current_acs$year
+
+
 
 ```
 
