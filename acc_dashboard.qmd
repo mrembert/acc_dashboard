@@ -635,7 +635,7 @@ host_airtable <- airtable("tblaloyqNggJgvHe6",'applaL6cJQ4WVe7Lt')
 
 host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJwFkvKeeE5RS", "fldkIelttv5tMgOrF", "fldFIFovrfPTMtsZ3"), id_to_col = TRUE) 
 
-names(host_df) <- c("host_id","host", "geogroup", "cohort_years", "ID")
+names(host_df) <- c("host_id","host", "ID", "geogroup", "cohort_years" )
 
 # Read geographic table from ACC airtable
 geo_airtable <- 
@@ -1590,12 +1590,20 @@ calc_metrics <- function(df, var){
 }
 
 
+# base_names_host <- acc_site_data |>
+#   group_by(host) |>
+#   mutate(areas_served = paste(NAME, collapse = ", "),
+#          states_served = paste(STATE_NAME, collapse = ", ")) |>
+#   select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -c(ID)) |>
+#   names()
+
 base_names_host <- acc_site_data |>
   group_by(host) |>
   mutate(areas_served = paste(NAME, collapse = ", "),
-         states_served = paste(STATE_NAME, collapse = ", ")) |> 
-  select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -c(ID)) |> 
+         states_served = paste(STATE_NAME, collapse = ", ")) |>
+  select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -geoid) |>
   names()
+
 
 base_names_area <- acc_site_data |> 
   select(geoid:GEOLEVEL,STATE_NAME,area_type, -c(ID, host, cohort_years)) |> 
@@ -1609,7 +1617,7 @@ output$area_table <- DT::renderDataTable({
 
 output$host_table <- DT::renderDataTable({
     acc_data_filtered() |>
-    group_by(host) |>
+    group_by(host, ID) |>
     areas_served() |> 
     mutate(states_served = paste(unique(STATE_NAME), collapse = ", ")) |> 
     select(base_names_host) |> 
