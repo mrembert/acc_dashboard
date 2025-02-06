@@ -71,14 +71,14 @@ get_fcc_availability_file <- function(file_id, file_name, api_username = Sys.get
   
   # You'll need to figure out the exact name of the CSV file inside the zip
   # This is a placeholder; replace with the actual CSV file name
-  csv_file_name <- list.files(file.path("source", "bb"), pattern = "\\.csv$", full.names = TRUE)[1] 
+  csv_file_name <- file.path("source", "bb",paste0(file_name,".csv"))
   
   if (length(csv_file_name) == 0) {
     stop("No CSV file found in the downloaded zip archive.")
   }
   
   bb_file <- readr::read_csv(csv_file_name) |> 
-    dplyr::mutate(across(where(is.character), as.character)) # Assuming you want to convert all character columns to character type
+    mutate(geography_id = as.character(geography_id))
   
   return(bb_file)
 }

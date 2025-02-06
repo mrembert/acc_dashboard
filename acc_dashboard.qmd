@@ -633,7 +633,11 @@ set_airtable_api_key(Sys.getenv("AIRTABLE_PAT"), install = FALSE)
 # Read host table form ACC airtable
 host_airtable <- airtable("tblaloyqNggJgvHe6",'applaL6cJQ4WVe7Lt')
 
+print(host_airtable)
+
 host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJwFkvKeeE5RS", "fldkIelttv5tMgOrF", "fldFIFovrfPTMtsZ3"), id_to_col = TRUE) 
+
+head(host_df)
 
 names(host_df) <- c("host_id","host", "ID", "geogroup", "cohort_years" )
 

@@ -540,7 +540,7 @@ grid-auto-rows: minmax(0, 1fr);">
 <div class="card-body html-fill-item html-fill-container">
 <p>Data sources for this dashboard include the following:</p>
 <ul>
-<li><p><a href="https://data.census.gov/" target="blank"><strong>US Census American Community Survey</strong></a> <strong>5-year estimates: 2018 - 2022</strong></p>
+<li><p><a href="https://data.census.gov/" target="blank"><strong>US Census American Community Survey</strong></a> <strong>5-year estimates: 2019 - 2023</strong></p>
 <ul>
 <li>Population</li>
 <li><p>Race &amp; ethnicity</p></li>
@@ -556,7 +556,7 @@ grid-auto-rows: minmax(0, 1fr);">
 <ul>
 <li>Rural, Suburban, Urban core definitions. <strong>Rural</strong> is defined as areas within non-metropolitan counties. <strong>Suburban</strong> is defined as areas within metro counties that are not the core metro county. <strong>Urban core</strong> is defined as areas within the metro core county.</li>
 </ul></li>
-<li><p><a href="https://broadbandmap.fcc.gov/home" target="blank"><strong>FCC National Broadband Map</strong></a> <strong>as of FCC: 2023-12-31</strong></p>
+<li><p><a href="https://broadbandmap.fcc.gov/home" target="blank"><strong>FCC National Broadband Map</strong></a> <strong>as of 2024-06-30</strong></p>
 <ul>
 <li>Availability of broadband subscription options by speed level.</li>
 </ul></li>
@@ -868,9 +868,13 @@ set_airtable_api_key(Sys.getenv("AIRTABLE_PAT"), install = FALSE)
 # Read host table form ACC airtable
 host_airtable <- airtable("tblaloyqNggJgvHe6",'applaL6cJQ4WVe7Lt')
 
+print(host_airtable)
+
 host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJwFkvKeeE5RS", "fldkIelttv5tMgOrF", "fldFIFovrfPTMtsZ3"), id_to_col = TRUE) 
 
-names(host_df) <- c("host_id","host", "geogroup", "cohort_years", "ID")
+head(host_df)
+
+names(host_df) <- c("host_id","host", "ID", "geogroup", "cohort_years" )
 
 # Read geographic table from ACC airtable
 geo_airtable <- 
@@ -1825,12 +1829,20 @@ calc_metrics <- function(df, var){
 }
 
 
+# base_names_host <- acc_site_data |>
+#   group_by(host) |>
+#   mutate(areas_served = paste(NAME, collapse = ", "),
+#          states_served = paste(STATE_NAME, collapse = ", ")) |>
+#   select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -c(ID)) |>
+#   names()
+
 base_names_host <- acc_site_data |>
   group_by(host) |>
   mutate(areas_served = paste(NAME, collapse = ", "),
-         states_served = paste(STATE_NAME, collapse = ", ")) |> 
-  select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -c(ID)) |> 
+         states_served = paste(STATE_NAME, collapse = ", ")) |>
+  select(geoid:cohort_years, areas_served, states_served, STATE_NAME,area_type, -geoid) |>
   names()
+
 
 base_names_area <- acc_site_data |> 
   select(geoid:GEOLEVEL,STATE_NAME,area_type, -c(ID, host, cohort_years)) |> 
@@ -1844,7 +1856,7 @@ output$area_table <- DT::renderDataTable({
 
 output$host_table <- DT::renderDataTable({
     acc_data_filtered() |>
-    group_by(host) |>
+    group_by(host, ID) |>
     areas_served() |> 
     mutate(states_served = paste(unique(STATE_NAME), collapse = ", ")) |> 
     select(base_names_host) |> 

@@ -336,21 +336,37 @@ acs_data <- rbind(place_data, county_data, state_data, us_data) |>
 #| label: Load broadband access data
 
 
-date<- get_fcc_as_of_dates_list() |> 
-  filter(data_type == "availability") |> 
-  mutate(as_of_date = as.Date(as_of_date)) |> 
-  filter(as_of_date == max(as_of_date)) |> 
-  select(as_of_date) |> 
-  pull()
+# Get available as of dates
+dates_df <- get_fcc_as_of_dates_list()
+print(dates_df)
 
-file_info_place <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Census Place") |> 
-  select(file_id, file_name)
+# Assuming the first date is the one you want
+date <- dates_df |>  
+  filter(data_type == "availability") |> 
+  filter(as_of_date == max(as_of_date)) |> 
+  pull(as_of_date)
+ 
+# Get the list of files for a specific date, category, and subcategory
+file_info_place <- get_fcc_availability_file_list(
+  as_of_date = date,
+  category = "Summary",
+  subcategory = "Summary by Geography Type - Census Place"
+)|> 
+  filter(technology_type == "Fixed Broadband")
+print(file_info_place)
 
 file_list_place <- purrr::map2(file_info_place$file_id, file_info_place$file_name, get_fcc_availability_file)
 
 place_df <- dplyr::bind_rows(file_list_place)
 
-file_info_other <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Other Geographies") 
+
+file_info_other <- get_fcc_availability_file_list(
+  as_of_date = date,
+  category = "Summary",
+  subcategory = "Summary by Geography Type - Other Geographies"
+) |> 
+  filter(technology_type == "Fixed Broadband")
+print(file_info_other)
 
 file_list_other <- purrr::map2(file_info_other$file_id, file_info_other$file_name, get_fcc_availability_file)
 
@@ -358,12 +374,35 @@ other_df <- dplyr::bind_rows(file_list_other)
 
 bb_data <- rbind(place_df, other_df) 
 
+
+# date<- get_fcc_as_of_dates_list() |> 
+#   filter(data_type == "availability") |> 
+#   mutate(as_of_date = as.Date(as_of_date)) |> 
+#   filter(as_of_date == max(as_of_date)) |> 
+#   select(as_of_date) |> 
+#   pull()
+# 
+# file_info_place <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Census Place") |> 
+#   select(file_id, file_name)
+# 
+# file_list_place <- purrr::map2(file_info_place$file_id, file_info_place$file_name, get_fcc_availability_file)
+# 
+# place_df <- dplyr::bind_rows(file_list_place)
+# 
+# file_info_other <- get_fcc_availability_file_list(date, category = "Summary", subcategory = "Fixed Broadband Summary by Geography Type - Other Geographies") 
+# 
+# file_list_other <- purrr::map2(file_info_other$file_id, file_info_other$file_name, get_fcc_availability_file)
+# 
+# other_df <- dplyr::bind_rows(file_list_other)
+# 
+# bb_data <- rbind(place_df, other_df) 
+
 bb_final <- bb_data |> 
   filter(biz_res %in% "R",
          technology == "All Wired",
          area_data_type == "Total") |> 
   mutate(fcc_date = paste(date)) |>
-  select(geography_id, fcc_date, total_units, speed_25_3, speed_100_20, speed_1000_100) |> 
+  select(geography_id, geography_type, fcc_date, total_units, speed_25_3, speed_100_20, speed_1000_100) |> 
   rename(GEOID = geography_id,
          pct_served_25_3 = speed_25_3,
          pct_served_100_20 = speed_100_20,

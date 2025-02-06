@@ -8,3 +8,4 @@ acc_dashboard_files/
 data/
 source/
 DO NOT INCLUDE/
+.RdataTmp*
