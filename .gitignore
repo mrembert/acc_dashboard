@@ -7,5 +7,5 @@ rsconnect/
 acc_dashboard_files/
 data/
 source/
-DO NOT INCLUDE/
+do_not_include/
 .RdataTmp*

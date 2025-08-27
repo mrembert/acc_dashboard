@@ -639,7 +639,11 @@ host_df <- read_airtable(host_airtable, fields = c("fldbefTdxINJvSKbm", "fldjEJw
 
 head(host_df)
 
-names(host_df) <- c("host_id","host", "ID", "geogroup", "cohort_years" )
+host_df <- host_df |> 
+  rename(host_id = airtable_record_id,
+         host = "Host Name",
+         cohort_years = "Cohort Years",
+         geogroup = "Host Site Type")
 
 # Read geographic table from ACC airtable
 geo_airtable <- 
