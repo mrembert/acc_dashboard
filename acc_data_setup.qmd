@@ -81,36 +81,36 @@ geo_structure <- rbind(places,counties,states, us)
 
 ```{r}
 #| label: Load variable tables
-#| eval: false
+#| eval: true
 
-vars_2022_profile <- load_variables(2022, "acs5/profile", cache = TRUE) 
+vars_2023_profile <- load_variables(2023, "acs5/profile", cache = TRUE) 
 
 vars_2018_profile <- load_variables(2018, "acs5/profile", cache = TRUE) 
 
-summary_table <- vars |> 
+summary_table <-vars_2023_profile |> 
   filter(str_detect(name, "DP05"))
 
-vars_2022_subject <- load_variables(2022, "acs5/subject", cache = TRUE) 
+vars_2023_subject <- load_variables(2023, "acs5/subject", cache = TRUE) 
 
-edu_table <- vars_2022_subject |> 
+edu_table <- vars_2023_subject |> 
   filter(str_detect(name, "S1501"))
 
-earnings_table <- vars_2022_subject |> 
+earnings_table <- vars_2023_subject |> 
   filter(str_detect(name, "S2001"))
 
-income_table <- vars_2022_subject |> 
+income_table <- vars_2023_subject |> 
   filter(str_detect(name, "S1903"))
 
-income_dist <- vars_2022_subject |> 
+income_dist <- vars_2023_subject |> 
   filter(str_detect(name, "S1901"))
 
-poverty_table  <- vars_2022_subject |> 
+poverty_table  <- vars_2023_subject |> 
   filter(str_detect(name, "S1701"))
 
-employment_table <- vars_2022_subject |> 
+employment_table <- vars_2023_subject |> 
   filter(str_detect(name, "S2301"))
 
-broadband_table <- vars_2022_subject |> 
+broadband_table <- vars_2023_subject |> 
   filter(str_detect(name, "S2801"))
 ```
 
@@ -120,20 +120,20 @@ broadband_table <- vars_2022_subject |>
 vars_current <- c(
   total_pop = "DP05_0001",
   pop_65_older = "DP05_0024",
-  white_nh = "DP05_0079",
-  black_nh = "DP05_0080",
-  aian_nh = "DP05_0081",
-  asian_nh = "DP05_0082",
-  nhpi_nh = "DP05_0083",
-  other_race_nh = "DP05_0084",
-  hispanic = "DP05_0073",
-  white_combo = "DP05_0066",
-  black_combo = "DP05_0067",
-  aian_combo = "DP05_0068",
-  asian_combo = "DP05_0069",
-  nhpi_combo = "DP05_0070",
-  other_race_combo = "DP05_0071",
-  multiracial = "DP05_0058",
+  white_nh = "DP05_0082",
+  black_nh = "DP05_0083",
+  aian_nh = "DP05_0084",
+  asian_nh = "DP05_0085",
+  nhpi_nh = "DP05_0086",
+  other_race_nh = "DP05_0087",
+  hispanic = "DP05_0076",
+  white_combo = "DP05_0069",
+  black_combo = "DP05_0070",
+  aian_combo = "DP05_0071",
+  asian_combo = "DP05_0072",
+  nhpi_combo = "DP05_0073",
+  other_race_combo = "DP05_0074",
+  multiracial = "DP05_0061",
   pop_25_older = "S1501_C01_006",
   bach_plus = "S1501_C01_015",
   median_earnings = "S2001_C01_013",
