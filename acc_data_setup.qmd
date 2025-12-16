@@ -1,8 +1,35 @@
 ---
-title: "ACC data setup"
+title: "ACC Data Setup"
 format: html
 editor: visual
 ---
+
+# Data Setup Pipeline
+
+This document serves as the **ETL (Extract, Transform, Load)** pipeline for the ACC Dashboard. It is designed to be run **infrequently** (e.g., once or twice a year) to update the underlying static datasets.
+
+## Data Sources
+
+1.  **US Census American Community Survey (ACS)**:
+    *   Fetched via `tidycensus` package.
+    *   Provides demographic, economic, and social data (5-year estimates).
+    *   **Requires**: `CENSUS_API_KEY` in `.Renviron`.
+
+2.  **FCC National Broadband Map**:
+    *   Fetched using `code/fcc_api_functions.R`.
+    *   Provides broadband availability data.
+    *   **Requires**: `FCC_USERNAME` and `FCC_API_KEY` in `.Renviron`.
+
+3.  **CDC Social Vulnerability Index (SVI)**:
+    *   Loaded from local CSV files in `source/`.
+    *   Provides social vulnerability rankings for communities.
+
+## Output
+
+The script produces the following artifact in the `data/` directory:
+*   `final_df.rda`: The main dataset combining all sources, joined to the geographic structure.
+*   `coords.rda`: Geographic coordinates for mapping.
+
 
 ```{r}
 #| label: Setup
@@ -14,6 +41,7 @@ library(tigris)
 library(sf)
 
 source("code/fcc_api_functions.R")
+source("code/acs_helpers.R")
 
 current_acs <- 2023
 
@@ -111,56 +139,10 @@ employment_table <- vars_2023_subject |>
   filter(str_detect(name, "S2301"))
 
 broadband_table <- vars_2023_subject |> 
-  filter(str_detect(name, "S2801"))
-```
-
-```{r}
+```r
 #| label: Define ACS variables
 
-vars_current <- c(
-  total_pop = "DP05_0001",
-  pop_65_older = "DP05_0024",
-  white_nh = "DP05_0082",
-  black_nh = "DP05_0083",
-  aian_nh = "DP05_0084",
-  asian_nh = "DP05_0085",
-  nhpi_nh = "DP05_0086",
-  other_race_nh = "DP05_0087",
-  hispanic = "DP05_0076",
-  white_combo = "DP05_0069",
-  black_combo = "DP05_0070",
-  aian_combo = "DP05_0071",
-  asian_combo = "DP05_0072",
-  nhpi_combo = "DP05_0073",
-  other_race_combo = "DP05_0074",
-  multiracial = "DP05_0061",
-  pop_25_older = "S1501_C01_006",
-  bach_plus = "S1501_C01_015",
-  median_earnings = "S2001_C01_013",
-  median_income = "S1903_C03_001",
-  poverty = "S1701_C03_001",
-  pop_16_older = "S2301_C01_001",
-  emp_pop_16_older = "S2301_C03_001",
-  pop_25_29 = "S2301_C01_004",
-  pop_30_34 = "S2301_C01_005",
-  pop_35_44 = "S2301_C01_006",
-  pop_45_54 = "S2301_C01_007",
-  emp_pop_25_29 = "S2301_C03_004",
-  emp_pop_30_34 = "S2301_C03_005",
-  emp_pop_35_44 = "S2301_C03_006",
-  emp_pop_45_54 = "S2301_C03_007",
-  total_households = "S2801_C01_001",
-  hh_w_computer = "S2801_C01_003",
-  hh_w_bb = "S2801_C01_017",
-  hh_less_20k_inc = "S2801_C01_020",
-  hh_less_20k_inc_bb = "S2801_C01_022",
-  inc_less_10k = "S1901_C01_002",
-  inc_10k_15k = "S1901_C01_003",
-  inc_15k_25k = "S1901_C01_004",
-  inc_25k_35k = "S1901_C01_005",
-  inc_35k_50k = "S1901_C01_006",
-  inc_50k_75k = "S1901_C01_007"
-)
+vars_current <- get_acc_vars(current_acs)
 
 # vars_past <- c(
 #   total_pop = "DP05_0001",
@@ -168,164 +150,12 @@ vars_current <- c(
 #   emp_pop_16_older = "S2301_C03_001"
 # )
 
-
-
-
-```
-
-```{r}
-#| label: Load place ACS data
-
-place_data_current <- get_acs(
-  geography = "place",
-  variables = vars_current,
-  year = current_acs,
-  survey = "acs5"
-)
-
-# place_data_past <- get_acs(
-#   geography = "place",
-#   variables = vars_past,
-#   year = current_acs-5,
-#   survey = "acs5"
-# )
-
-# place_data_past_xwalk <- place_data_past |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
-#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
-#   mutate(employed = round(pop_16_older*emp_pop_16_older/100,0)) |> 
-#   left_join(place_10_20_xwalk) |> 
-#   group_by(GEOID_PLACE_20, NAMELSAD_PLACE_20) |> 
-#   summarize(
-#     total_pop_5yr_past = round(sum(total_pop*percent),0),
-#     employed_5yr_past = round(sum(employed*percent),0)
-#   ) |> 
-#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
-#   mutate(moe = NA) |> 
-#   rename(GEOID = GEOID_PLACE_20,
-#          NAME = NAMELSAD_PLACE_20) |> 
-#   mutate(GEOID = trimws(GEOID)) |> 
-#   filter(GEOID != "NA") |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
-
-# Removing past data
-# place_data <- rbind(place_data_current, place_data_past_xwalk)
-place_data <- rbind(place_data_current)
-
-```
-
-```{r}
-#| label: Load county ACS data
-
-county_data_current <- get_acs(
-  geography = "county",
-  variables = vars_current,
-  year = current_acs,
-  survey = "acs5"
-)
-
-
-# county_data_past <- get_acs(
-#   geography = "county",
-#   variables = vars_past,
-#   year = current_acs-5,
-#   survey = "acs5"
-# )
-# 
-# county_data_past <- county_data_past |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
-#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
-#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
-#   rename(total_pop_5yr_past = total_pop) |> 
-#   select(-pop_16_older, -emp_pop_16_older) |> 
-#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
-#   mutate(moe = NA) |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
-
-# Removing past data
-# county_data <- rbind(county_data_current, county_data_past)
-county_data <- rbind(county_data_current)
-
-
-```
-
-```{r}
-#| label: Load state ACS data
-
-state_data_current <- get_acs(
-  geography = "state",
-  variables = vars_current,
-  year = current_acs,
-  survey = "acs5"
-)
-
-
-# state_data_past <- get_acs(
-#   geography = "state",
-#   variables = vars_past,
-#   year = current_acs-5,
-#   survey = "acs5"
-# )
-# 
-# state_data_past <- state_data_past |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
-#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
-#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
-#   rename(total_pop_5yr_past = total_pop) |> 
-#   select(-pop_16_older, -emp_pop_16_older) |> 
-#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
-#   mutate(moe = NA) |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
-
-# Removing past data
-# state_data <- rbind(state_data_current, state_data_past)
-state_data <- rbind(state_data_current)
-
-```
-
-```{r}
-#| label: Load US ACS data
-
-us_data_current <- get_acs(
-  geography = "us",
-  variables = vars_current,
-  year = current_acs,
-  survey = "acs5"
-)
-
-us_data_current <- us_data_current |> 
-  mutate(GEOID = "00")
-
-# us_data_past <- get_acs(
-#   geography = "us",
-#   variables = vars_past,
-#   year = current_acs-5,
-#   survey = "acs5"
-# )
-# 
-# us_data_past <- us_data_past |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5)) |> 
-#   pivot_wider(id_cols  = -moe, names_from = variable, values_from = estimate) |> 
-#   mutate(employed_5yr_past = round(pop_16_older*emp_pop_16_older/100,0)) |> 
-#   rename(total_pop_5yr_past = total_pop) |> 
-#   select(-pop_16_older, -emp_pop_16_older) |> 
-#   pivot_longer(cols = c(total_pop_5yr_past, employed_5yr_past),names_to = "variable", values_to = "estimate") |> 
-#   mutate(moe = NA) |> 
-#   mutate(acs5 = paste(current_acs-9,"-", current_acs-5))
-
-# Removing past data
-# us_data <- rbind(us_data_current, us_data_past)
-us_data <- rbind(us_data_current)
-
 ```
 
 ```{r}
 #| label: Combine ACS data
  
-acs_data <- rbind(place_data, county_data, state_data, us_data) |> 
-  select(-moe) |> 
-  pivot_wider(names_from = "variable", values_from = "estimate") |> 
-  select(-NAME) |> 
+acs_data <- fetch_acc_data(current_acs, vars_current, survey = "acs5") |> 
   mutate(acs5 = paste(current_acs-4,"-", current_acs))
 
 #save(acs_data, file="data_setup/acs_data.rda")
@@ -618,7 +448,7 @@ svi_state_us <- rbind(svi_state, svi_us) |>
 ```
 
 ```{r}
-#| label: Setup 
+#| label: Load metro/rural type data 
 
 area_type <- read.csv("source/metro_rural_type.csv")
 
@@ -661,11 +491,11 @@ save(final_df, file = "data/final_df.rda")
 ```{r}
 #| label: Set up map coordinates
 
-place_sf <- places(cb=TRUE) |> 
+place_sf <- tigris::places(cb=TRUE, year = current_acs) |> 
   select(GEOID, geometry)
-state_sf <- states(cb=TRUE)|> 
+state_sf <- tigris::states(cb=TRUE, year = current_acs)|> 
   select(GEOID, geometry)
-county_sf <- counties(cb=TRUE)|> 
+county_sf <- tigris::counties(cb=TRUE, year = current_acs)|> 
   select(GEOID, geometry)
 
 coords <- rbind(place_sf, state_sf, county_sf) |> 
